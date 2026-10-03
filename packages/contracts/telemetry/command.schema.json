@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firesight.local/contracts/telemetry/command.schema.json",
+  "title": "FireSight Telemetry Command",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["buzzer", "state"],
+  "properties": {
+    "buzzer": { "type": "boolean" },
+    "state": {
+      "type": "string",
+      "enum": ["WARMUP", "NORMAL", "CHECKING", "WARNING", "ALARM"]
+    }
+  }
+}

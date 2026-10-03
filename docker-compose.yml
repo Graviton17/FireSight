@@ -1,0 +1,14 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    env_file:
+      - apps/backend/.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - firesight-data:/app/data
+
+volumes:
+  firesight-data:

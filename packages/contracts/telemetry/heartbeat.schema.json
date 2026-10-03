@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firesight.local/contracts/telemetry/heartbeat.schema.json",
+  "title": "FireSight Telemetry Heartbeat",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["device_id", "mq2", "warmup_done", "local_alarm", "uptime_s", "fw"],
+  "properties": {
+    "device_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "mq2": { "type": "integer", "minimum": 0, "maximum": 4095 },
+    "temp_c": { "type": ["number", "null"], "minimum": -40, "maximum": 125 },
+    "hum_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "warmup_done": { "type": "boolean" },
+    "local_alarm": { "type": "boolean" },
+    "uptime_s": { "type": "integer", "minimum": 0 },
+    "rssi": { "type": ["integer", "null"] },
+    "fw": { "type": "string", "maxLength": 32 }
+  }
+}
