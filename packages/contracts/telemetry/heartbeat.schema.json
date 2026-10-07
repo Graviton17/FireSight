@@ -14,6 +14,9 @@
     "local_alarm": { "type": "boolean" },
     "uptime_s": { "type": "integer", "minimum": 0 },
     "rssi": { "type": ["integer", "null"] },
-    "fw": { "type": "string", "maxLength": 32 }
+    "fw": { "type": "string", "maxLength": 32 },
+    "flame_ir": { "type": ["boolean", "null"] },
+    "flame_ir_raw": { "type": ["integer", "null"], "minimum": 0, "maximum": 4095 },
+    "silenced": { "type": "boolean" }
   }
 }

@@ -18,7 +18,7 @@ FireSight combines an ESP32 sensing node, a FastAPI decision service, an Android
 
 ```text
 ESP32 node                    FastAPI backend                   Browser dashboard
-MQ-2 + DHT11 + buzzer   ->    telemetry + decision engine  ->   live state and history
+MQ-2 + flame + NTC      ->    telemetry + decision engine  ->   live state and history
       ^                         camera + detector                  controls
       |                         SQLite + evidence frames           |
       +--------------------- buzzer command <----------------------+
@@ -102,7 +102,7 @@ POST /api/telemetry
 X-API-Key: <device secret>
 ```
 
-The request includes `device_id`, MQ-2 reading, temperature, humidity, warm-up status, and local-alarm status. The response returns the `buzzer` command and current device `state`.
+The request includes `device_id`, MQ-2 reading, NTC temperature, IR flame state, warm-up status, silence state, and local-alarm status (`hum_pct` is sent as `null` in the budget build). The response returns the `buzzer` command and current device `state`.
 
 The canonical schemas are in [packages/contracts/telemetry](packages/contracts/telemetry). Change the schemas deliberately and update every runtime that consumes them.
 

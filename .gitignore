@@ -30,6 +30,7 @@ coverage/
 # PlatformIO
 apps/firmware/esp32/.pio/
 apps/firmware/esp32/.vscode/
+apps/firmware/esp32/include/secrets.hpp
 
 # AI Agent
 .agents
