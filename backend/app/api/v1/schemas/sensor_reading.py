@@ -3,6 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.api.v1.schemas.fire_image import FireImageResponse
 from app.data_layer.data_classes.sensor_reading import SensorReading
 
 # ESP32 ADC is 12-bit.
@@ -28,7 +29,17 @@ class SensorReadingResponse(BaseModel):
     temperature: Optional[float] = None
     fire: bool
     created_at: Optional[str] = None
+    # The fire_images row for this reading, if one was captured. Only filled on GET.
+    image: Optional[FireImageResponse] = None
 
 
-def sensor_reading_to_response(reading: SensorReading) -> SensorReadingResponse:
-    return SensorReadingResponse(**asdict(reading))
+class SensorReadingCreateResponse(SensorReadingResponse):
+    # True when this POST triggered a phone-camera capture (fire + camera
+    # configured + outside the cooldown). The image row appears a moment later.
+    image_capture_scheduled: bool = False
+
+
+def sensor_reading_to_response(
+    reading: SensorReading, image: Optional[FireImageResponse] = None
+) -> SensorReadingResponse:
+    return SensorReadingResponse(**asdict(reading), image=image)
