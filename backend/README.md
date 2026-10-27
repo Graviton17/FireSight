@@ -9,16 +9,18 @@ app/
   static_memory_cache.py    config.json loader
   telemetries/logger.py     structlog setup
   core/errors/              {"error": {code, message}} envelope
+  core/camera/              IP Webcam (Android) snapshot client
+  core/storage/             fire-images bucket adapter
   api/v1/
     router.py               aggregates routers
     sensor_routes.py        /api/v1/sensor-data endpoints
     schemas/                Pydantic request/response models
-  services/                 business logic (SensorReadingService)
+  services/                 SensorReadingService, FireCaptureService
   data_layer/
     database_manager.py     singleton holding Supabase + CRUD instances
     crud/                   BaseCrud + SensorReadingCrud
     data_classes/           one dataclass per table
-supabase/migrations/        SQL for sensor_readings, fire_stations, devices
+supabase/migrations/        sensor_readings, fire_images (+ bucket), fire_stations, devices
 scripts/fire_stations/      Google Maps scrape + importer for Gujarat fire stations
 tests/
 ```
@@ -39,12 +41,52 @@ tests/
 
    The server listens on `0.0.0.0:8000`, so the ESP32 can reach it on your LAN IP.
 
+## Phone camera (fire snapshots)
+
+1. Install **IP Webcam** on the Android phone, tap **Start server**, and note the
+   address it shows (e.g. `http://192.168.1.50:8080`). The phone must be on the
+   same WiFi as the backend.
+2. Check it works: open `http://<phone-ip>:8080/shot.jpg` in a browser.
+3. Add to `config.json`:
+
+   ```json
+   "camera": {
+     "base_url": "http://192.168.1.50:8080",
+     "snapshot_path": "/shot.jpg",
+     "username": "",
+     "password": "",
+     "timeout_seconds": 10,
+     "capture_interval_seconds": 10
+   }
+   ```
+
+   - `snapshot_path`: `/shot.jpg` = current video frame (fast); `/photo.jpg` =
+     full-resolution photo with autofocus (slower).
+   - `username`/`password`: only if you set a login in IP Webcam.
+   - `capture_interval_seconds`: while the fire continues the ESP32 posts every
+     5 s; this caps captures to one per device per interval.
+
+   **Changing the IP on the fly:** the `camera` section is re-read whenever
+   `config.json` is saved, so just edit `base_url` (or any camera setting) and
+   save. No restart needed; the next fire capture uses the new value. (If
+   `FIRESIGHT_CAMERA_URL` is set in the environment it always wins.)
+
+When a POST has `"fire": true`, the backend replies immediately with
+`"image_capture_scheduled": true`, then grabs the snapshot in the background,
+uploads it to `fire-images/{device_id}/{date}/{reading_id}.jpg`, and inserts a
+row in `fire_images` (`reading_id`, `device_id`, `bucket`, `storage_path`,
+`content_type`, `size_bytes`, `captured_at`, all NOT NULL; one image per
+reading). GET endpoints return it as `image` on the reading, with a signed
+`url` (valid 1 hour). If the phone is unreachable the error is logged and the next fire
+reading retries.
+
 ## Endpoints
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/api/v1/sensor-data` | Body: `device_id`, `smoke`, `flame`, `temperature` (nullable), `fire`. Returns 201. |
-| GET | `/api/v1/sensor-data/{device_id}/latest` | Latest reading, 404 if none. |
+| POST | `/api/v1/sensor-data` | Body: `device_id`, `smoke`, `flame`, `temperature` (nullable), `fire`. Returns 201 with the reading + `image_capture_scheduled` + `nearest_fire_stations` (filled when `fire` is true). |
+| GET | `/api/v1/sensor-data/{device_id}/latest` | Latest reading (with `image` if one was captured), 404 if none. |
+| GET | `/api/v1/sensor-data/{device_id}/images?page=&page_size=` | Fire snapshots, newest first, with signed URLs. |
 | GET | `/api/v1/sensor-data/{device_id}?page=&page_size=` | History, newest first. |
 | GET | `/api/v1/fire-stations?search=&page=&page_size=` | Station directory, alphabetical. |
 | POST | `/api/v1/fire-stations` | Add a station by hand: `name`, `latitude`, `longitude`, optional `address`, `city`, `phone`, … |

@@ -4,7 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.data_layer.data_classes.sensor_reading import SensorReading
+from app.services.fire_capture_service import FireCaptureService
 from app.services.sensor_reading_service import SensorReadingService
+from app.static_memory_cache import StaticMemoryCache
 from main import app
 
 VALID_BODY = {
@@ -25,7 +27,14 @@ def client(monkeypatch):
         stored.append(reading)
         return reading
 
+    async def no_capture(reading):
+        return None
+
     monkeypatch.setattr(SensorReadingService, "record_reading", staticmethod(fake_record_reading))
+    # Never touch the real phone camera from config.json.
+    monkeypatch.setattr(StaticMemoryCache, "config", {})
+    monkeypatch.setattr(StaticMemoryCache, "reload_if_changed", classmethod(lambda cls: False))
+    monkeypatch.setattr(FireCaptureService, "capture_for_reading", staticmethod(no_capture))
     # No `with` block: the lifespan (and its Supabase connection) never runs.
     test_client = TestClient(app)
     test_client.stored = stored  # type: ignore[attr-defined]

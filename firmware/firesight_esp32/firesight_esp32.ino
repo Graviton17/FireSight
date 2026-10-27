@@ -15,19 +15,21 @@ const char* WIFI_PASS = "Graviton@17Hmm";
 const char* SERVER_URL = "http://10.16.168.123:8000/api/v1/sensor-data";
 #define HTTP_TIMEOUT_MS 3000
 #define DEVICE_ID "esp32-fire-01"
-#define POST_INTERVAL_MS 5000      // also posts immediately when alarm state changes
+#define POST_INTERVAL_MS 10000      // also posts immediately when alarm state changes
 
 // ---------- Pins ----------
 #define PIN_NTC 32
 #define PIN_BUZZER 33
 #define PIN_MQ2_AO 34
 #define PIN_FLAME_AO 35
-#define PIN_LED 19
+#define PIN_LED 23
 #define PIN_SWITCH 21              // one leg to GPIO21, other leg to GND (no resistor needed)
 
 #define BUZZER_ON  HIGH            // swap these if your buzzer module is active-LOW
 #define BUZZER_OFF LOW
-#define LED_BLINK_MS 150           // blink length after a successful POST
+#define LED_ON  LOW               // LED is active-LOW; swap these if it is wired to GND
+#define LED_OFF HIGH
+#define LED_BLINK_MS 1000           // blink length after a successful POST
 
 // ---------- Fire thresholds (TUNE THESE) ----------
 #define SMOKE_THRESHOLD 1500       // smoke vote when raw ADC  >  this (0-4095)
@@ -162,9 +164,9 @@ void updateAlarm(bool fireNow) {
 
 // One short blink to show a successful POST
 void blinkLed() {
-  digitalWrite(PIN_LED, HIGH);
+  digitalWrite(PIN_LED, LED_ON);
   delay(LED_BLINK_MS);
-  digitalWrite(PIN_LED, LOW);
+  digitalWrite(PIN_LED, LED_OFF);
 }
 
 // Sends sensor readings as JSON via HTTP POST. Returns true on 2xx response.
@@ -256,6 +258,7 @@ void checkSensors() {
     lastFireState = fireAlarm;
     lastPost = now;
     if (postSensorData(smokeValue, flameValue, tempC, fireAlarm)) {
+      Serial.println("reached");
       blinkLed();   // blink only when the server returned 2xx
     }
   }
@@ -313,7 +316,7 @@ void setup() {
   digitalWrite(PIN_BUZZER, BUZZER_OFF);
 
   pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, LOW);
+  digitalWrite(PIN_LED, LED_OFF);
 
   pinMode(PIN_SWITCH, INPUT_PULLUP);   // pressed = LOW
 

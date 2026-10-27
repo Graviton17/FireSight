@@ -75,6 +75,64 @@ class SupabaseClient:
         return self.async_client.table(table_name)
 
     # ------------------------------------------------------------------
+    # Storage
+    # ------------------------------------------------------------------
+
+    async def upload_file(
+        self,
+        bucket_name: str,
+        file_path: str,
+        file_content: bytes,
+        content_type: str = "application/octet-stream",
+        upsert: bool = False,
+    ) -> bool:
+        """Upload a file to Supabase Storage."""
+        try:
+            await self.async_client.storage.from_(bucket_name).upload(
+                path=file_path,
+                file=file_content,
+                file_options={
+                    "content-type": content_type,
+                    "upsert": "true" if upsert else "false",
+                },
+            )
+            return True
+        except Exception as e:
+            logger.error("Error uploading file", bucket=bucket_name, path=file_path, exc_info=e)
+            return False
+
+    async def delete_files(self, bucket_name: str, file_paths: List[str]) -> bool:
+        """Delete one or more files from Supabase Storage."""
+        if not file_paths:
+            return True
+        try:
+            await self.async_client.storage.from_(bucket_name).remove(file_paths)
+            return True
+        except Exception as e:
+            logger.error("Error deleting files", bucket=bucket_name, exc_info=e)
+            return False
+
+    async def create_signed_url(
+        self, bucket_name: str, file_path: str, expires_in: int
+    ) -> Optional[str]:
+        """Return a temporary signed URL for an object in a private bucket."""
+        try:
+            result = await self.async_client.storage.from_(bucket_name).create_signed_url(
+                file_path,
+                expires_in,
+            )
+            if isinstance(result, dict):
+                return (
+                    result.get("signedURL")
+                    or result.get("signedUrl")
+                    or result.get("signed_url")
+                )
+            return getattr(result, "signed_url", None) or getattr(result, "signedURL", None)
+        except Exception as e:
+            logger.error("Error creating signed URL", bucket=bucket_name, path=file_path, exc_info=e)
+            return None
+
+    # ------------------------------------------------------------------
     # RPC
     # ------------------------------------------------------------------
 
