@@ -9,3 +9,11 @@ class TablesNameConstant:
     """
 
     SENSOR_READINGS = "sensor_readings"
+    FIRE_STATIONS = "fire_stations"
+    DEVICES = "devices"
+
+
+class RpcFunctionsConstant:
+    """Postgres functions called over PostgREST RPC."""
+
+    NEAREST_FIRE_STATIONS = "nearest_fire_stations"

@@ -4,8 +4,10 @@ from app.api.v1.schemas import (
     PaginatedResponse,
     SensorReadingCreateRequest,
     SensorReadingResponse,
+    nearby_fire_station_to_response,
     sensor_reading_to_response,
 )
+from app.services.fire_station_service import FireStationService
 from app.services.sensor_reading_service import SensorReadingService
 
 router = APIRouter(prefix="/sensor-data", tags=["Sensor Data"])
@@ -13,7 +15,7 @@ router = APIRouter(prefix="/sensor-data", tags=["Sensor Data"])
 
 @router.post("", response_model=SensorReadingResponse, status_code=201)
 async def create_sensor_reading(request_data: SensorReadingCreateRequest):
-    """Store one reading from an ESP32."""
+    """Store one reading from an ESP32. On fire, also returns the nearest stations."""
     reading = await SensorReadingService.record_reading(
         device_id=request_data.device_id,
         smoke=request_data.smoke,
@@ -21,7 +23,11 @@ async def create_sensor_reading(request_data: SensorReadingCreateRequest):
         temperature=request_data.temperature,
         fire=request_data.fire,
     )
-    return sensor_reading_to_response(reading)
+    response = sensor_reading_to_response(reading)
+    if reading.fire:
+        stations = await FireStationService.nearest_for_alarm(reading.device_id)
+        response.nearest_fire_stations = [nearby_fire_station_to_response(s) for s in stations]
+    return response
 
 
 @router.get("/{device_id}/latest", response_model=SensorReadingResponse)
