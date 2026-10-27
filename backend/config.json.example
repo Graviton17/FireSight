@@ -1,0 +1,19 @@
+{
+  "database": {
+    "supabase_url": "https://your-project.supabase.co",
+    "supabase_key": "your-anon-key",
+    "supabase_service_role_key": "your-service-role-key"
+  },
+  "server": {
+    "port": 8000,
+    "base_url": "http://localhost:8000",
+    "cors_origins": [
+      "http://localhost:5173"
+    ],
+    "environment": "development",
+    "auto_reload": true
+  },
+  "logging": {
+    "log_level": "INFO"
+  }
+}

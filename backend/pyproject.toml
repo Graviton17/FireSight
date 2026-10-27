@@ -1,0 +1,46 @@
+[project]
+name = "firesight-backend"
+version = "0.1.0"
+description = "FireSight Backend API — receives ESP32 fire-sensor readings"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.11.0",
+    "supabase>=2.18.0",
+    "httpx>=0.28.1,<0.29.0",
+    "structlog>=25.3.0",
+    "rich>=13.9.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.16.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+extend-exclude = ["supabase"]
+
+[tool.ruff.lint]
+# pycodestyle errors/warnings, pyflakes, isort, bugbear
+select = ["E", "W", "F", "I", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom, not a mutable default.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body", "fastapi.Header",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]

@@ -1,0 +1,25 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# ---- Virtual Environments ----
+venv/
+.venv/
+
+# ---- UV ----
+.python-version
+
+# ---- OS ----
+.DS_Store
+
+# ---- Environment / Secrets ----
+.env
+.env.*
+config.json
+!config.json.example
+
+# ---- Testing ----
+.pytest_cache/

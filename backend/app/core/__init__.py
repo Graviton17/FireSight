@@ -1,0 +1,1 @@
+# FireSight Backend — core package
