@@ -19,7 +19,11 @@
     "username": "",
     "password": "",
     "timeout_seconds": 10,
-    "capture_interval_seconds": 10
+    "capture_interval_seconds": 10,
+    "device_id": "",
+    "location_max_accuracy_m": 50,
+    "location_timeout_seconds": 1.5,
+    "location_cache_seconds": 60
   },
   "logging": {
     "log_level": "INFO"

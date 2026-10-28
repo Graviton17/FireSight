@@ -73,8 +73,8 @@ class FireStationService:
 
     @staticmethod
     async def nearest_to_device(device_id: str, limit: int = 3) -> Optional[List[NearbyFireStation]]:
-        """``None`` when the device has no registered location."""
-        device = await DeviceService.get(device_id)
+        """``None`` when the device has no location (no manual pin, no phone GPS fix)."""
+        device = await DeviceService.resolve_location(device_id)
         if device is None:
             return None
         return await FireStationService.nearest(device.latitude, device.longitude, limit)
@@ -87,14 +87,20 @@ class FireStationService:
         not turn the ESP32's POST into an error.
         """
         try:
-            stations = await FireStationService.nearest_to_device(device_id, limit)
+            device = await DeviceService.resolve_location(device_id)
+            stations = (
+                await FireStationService.nearest(device.latitude, device.longitude, limit)
+                if device is not None
+                else None
+            )
         except Exception as e:
             logger.error("Nearest fire station lookup failed", device_id=device_id, exc_info=e)
             return []
 
-        if stations is None:
+        if device is None or stations is None:
             logger.warning(
-                "FIRE ALARM but device has no location; set it with PUT /api/v1/devices/{device_id}",
+                "FIRE ALARM but device has no location: tick 'Get location' on the IP Webcam "
+                "Sensors page, or set it with PUT /api/v1/devices/{device_id}",
                 device_id=device_id,
             )
             return []
@@ -102,6 +108,15 @@ class FireStationService:
             logger.warning("FIRE ALARM but fire_stations table is empty", device_id=device_id)
             return []
 
+        logger.warning(
+            "Fire location",
+            device_id=device_id,
+            latitude=device.latitude,
+            longitude=device.longitude,
+            source=device.location_source,
+            accuracy_m=device.location_accuracy_m,
+            maps=f"https://maps.google.com/?q={device.latitude},{device.longitude}",
+        )
         nearest = stations[0]
         logger.warning(
             "Nearest fire station",

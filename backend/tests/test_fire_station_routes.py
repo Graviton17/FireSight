@@ -8,6 +8,7 @@ from app.data_layer.data_classes.fire_station import FireStation, NearbyFireStat
 from app.data_layer.data_classes.sensor_reading import SensorReading
 from app.services.device_service import DeviceService
 from app.services.fire_station_service import FireStationService
+from app.services.phone_location_service import PhoneLocationService
 from app.services.sensor_reading_service import SensorReadingService
 from main import app
 
@@ -42,7 +43,12 @@ def client(monkeypatch):
     async def fake_record_reading(**kwargs):
         return SensorReading(id="r-1", **kwargs)
 
+    async def no_phone_fix():
+        return None
+
     monkeypatch.setattr(DeviceService, "get", staticmethod(fake_get))
+    # Never reach the real phone from config.json.
+    monkeypatch.setattr(PhoneLocationService, "current_fix", staticmethod(no_phone_fix))
     monkeypatch.setattr(DeviceService, "set_location", staticmethod(fake_set_location))
     monkeypatch.setattr(FireStationService, "nearest", staticmethod(fake_nearest))
     monkeypatch.setattr(FireStationService, "add_station", staticmethod(fake_add_station))

@@ -10,6 +10,7 @@ from app.api.v1.router import api_router
 from app.core.errors import register_exception_handlers
 from app.data_layer.database_manager import DatabaseManager
 from app.services.fire_capture_service import FireCaptureService
+from app.services.phone_location_service import PhoneLocationService
 from app.static_memory_cache import StaticMemoryCache
 from app.telemetries.logger import logger
 
@@ -38,10 +39,12 @@ async def lifespan(app: FastAPI):
     # In the background so an offline phone doesn't hold up startup for the
     # camera timeout. The result shows up in the log a moment later.
     camera_check = asyncio.create_task(FireCaptureService.check_camera())
+    location_check = asyncio.create_task(PhoneLocationService.check())
 
     yield
 
     camera_check.cancel()
+    location_check.cancel()
 
     try:
         await DatabaseManager.get_instance().shutdown()

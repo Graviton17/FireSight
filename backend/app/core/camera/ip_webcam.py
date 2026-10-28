@@ -4,13 +4,16 @@ The app serves a snapshot over plain HTTP on the phone's LAN address:
 
 * ``/shot.jpg``  — current video frame (fast, video resolution)
 * ``/photo.jpg`` — takes a real photo with autofocus (slower, full resolution)
+* ``/gps.json``  — the phone's position, once "Get location" is ticked on the
+  app's Sensors page (``/sensors.html``); ``{}`` until then
 
 If "Login/password" is set in the app, it uses HTTP basic auth.
 """
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
@@ -22,6 +25,41 @@ class CameraError(Exception):
     """The phone could not be reached or returned something that isn't a JPEG."""
 
 
+@dataclass
+class PhoneLocation:
+    """One position fix reported by the phone."""
+
+    latitude: float
+    longitude: float
+    accuracy_m: float
+    provider: str  # 'gps' (satellite) or 'network' (Wi-Fi / cell towers)
+
+
+def parse_gps_json(data: Dict[str, Any]) -> Optional[PhoneLocation]:
+    """Pick the most accurate provider from a ``/gps.json`` body; ``None`` if it has no fix.
+
+    Body shape: ``{"gps": {"latitude", "longitude", "altitude", "accuracy"},
+    "network": {...}}`` — either key may be missing.
+    """
+    fixes = []
+    for provider in ("gps", "network"):
+        fix = data.get(provider)
+        if not isinstance(fix, dict):
+            continue
+        try:
+            fixes.append(
+                PhoneLocation(
+                    latitude=float(fix["latitude"]),
+                    longitude=float(fix["longitude"]),
+                    accuracy_m=float(fix["accuracy"]),
+                    provider=provider,
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return min(fixes, key=lambda f: f.accuracy_m) if fixes else None
+
+
 class IpWebcamClient:
     def __init__(
         self,
@@ -30,7 +68,8 @@ class IpWebcamClient:
         timeout_seconds: float = 10.0,
         auth: Optional[Tuple[str, str]] = None,
     ):
-        self.snapshot_url = f"{base_url.rstrip('/')}/{snapshot_path.lstrip('/')}"
+        self.base_url = base_url.rstrip("/")
+        self.snapshot_url = f"{self.base_url}/{snapshot_path.lstrip('/')}"
         self.timeout_seconds = timeout_seconds
         self.auth = auth
 
@@ -65,3 +104,20 @@ class IpWebcamClient:
         if len(body) > FireImageLimits.MAX_BYTES:
             raise CameraError(f"Image is {len(body)} bytes, over the {FireImageLimits.MAX_BYTES} limit")
         return body
+
+    async def get_location(self, timeout_seconds: float) -> Optional[PhoneLocation]:
+        """The phone's current position, or ``None`` when it has no fix yet."""
+        url = f"{self.base_url}/gps.json"
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, auth=self.auth) as client:
+                response = await client.get(url)
+        except httpx.HTTPError as e:
+            raise CameraError(f"Phone unreachable at {url}: {e}") from e
+
+        if response.status_code != 200:
+            raise CameraError(f"Phone returned HTTP {response.status_code} for {url}")
+        try:
+            data = response.json()
+        except ValueError as e:
+            raise CameraError("Phone /gps.json is not JSON") from e
+        return parse_gps_json(data) if isinstance(data, dict) else None

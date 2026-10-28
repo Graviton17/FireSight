@@ -7,7 +7,7 @@ from app.data_layer.data_classes.device import Device
 
 
 class DeviceLocationRequest(BaseModel):
-    """Where the ESP32 is installed. Copy lat/lng from Google Maps (right-click the spot)."""
+    """Pin a device's location by hand. Wins over the phone's GPS from then on."""
 
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
@@ -21,6 +21,8 @@ class DeviceResponse(BaseModel):
     longitude: float
     name: Optional[str] = None
     address: Optional[str] = None
+    location_source: str = "manual"
+    location_accuracy_m: Optional[float] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
