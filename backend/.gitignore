@@ -26,3 +26,6 @@ config.json
 
 # Scraper output
 scripts/fire_stations/output/
+
+# ---- Model weights (download, see README) ----
+models/

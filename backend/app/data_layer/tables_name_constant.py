@@ -12,6 +12,7 @@ class TablesNameConstant:
     FIRE_STATIONS = "fire_stations"
     DEVICES = "devices"
     FIRE_IMAGES = "fire_images"
+    FIRE_DETECTIONS = "fire_detections"
 
 
 class RpcFunctionsConstant:

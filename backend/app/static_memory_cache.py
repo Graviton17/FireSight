@@ -129,10 +129,16 @@ class StaticMemoryCache:
         return configured or None
 
     @classmethod
-    def get_camera_capture_interval_seconds(cls) -> float:
-        """Minimum gap between two captures for the same device while fire persists."""
+    def get_detection_threshold(cls) -> float:
+        """Fire score (0-1) at or above which the image confirms fire. Re-read live."""
         cls.reload_if_changed()
-        return float(cls.config.get("camera", {}).get("capture_interval_seconds", 10))
+        return float(cls.config.get("detection", {}).get("threshold", 0.7))
+
+    @classmethod
+    def get_verification_timeout_seconds(cls) -> float:
+        """Budget for camera + model on a fire POST. The ESP32 waits 5 s in total."""
+        cls.reload_if_changed()
+        return float(cls.config.get("detection", {}).get("timeout_seconds", 4.0))
 
     @classmethod
     def get_environment(cls) -> str:

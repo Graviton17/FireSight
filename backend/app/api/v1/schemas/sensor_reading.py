@@ -1,11 +1,12 @@
 from dataclasses import asdict
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from app.api.v1.schemas.fire_image import FireImageResponse
 from app.api.v1.schemas.fire_station import NearbyFireStationResponse
 from app.data_layer.data_classes.sensor_reading import SensorReading
+from app.services.fire_verification_service import Verification, VerificationStatus
 
 # ESP32 ADC is 12-bit.
 _ADC_MAX = 4095
@@ -34,11 +35,23 @@ class SensorReadingResponse(BaseModel):
     image: Optional[FireImageResponse] = None
 
 
+class VerificationResponse(BaseModel):
+    """Second verification by the image model. See FireVerificationService."""
+
+    status: VerificationStatus
+    latency_ms: int
+    reason: Optional[str] = None             # set when status is "unavailable"
+    label: Optional[str] = None              # top class, e.g. "Fire", "None"
+    fire_score: Optional[float] = None
+    threshold: Optional[float] = None
+    scores: Optional[Dict[str, float]] = None
+
+
 class SensorReadingCreateResponse(SensorReadingResponse):
-    # True when this POST triggered a phone-camera capture (fire + camera
-    # configured + outside the cooldown). The image row appears a moment later.
-    image_capture_scheduled: bool = False
-    # Nearest stations when fire is true and the device has a location; empty otherwise.
+    # What the ESP32 acts on: sound the buzzer or not.
+    buzz: bool
+    verification: VerificationResponse
+    # Nearest stations when the alarm buzzes and the device has a location; empty otherwise.
     nearest_fire_stations: List[NearbyFireStationResponse] = []
 
 
@@ -46,3 +59,16 @@ def sensor_reading_to_response(
     reading: SensorReading, image: Optional[FireImageResponse] = None
 ) -> SensorReadingResponse:
     return SensorReadingResponse(**asdict(reading), image=image)
+
+
+def verification_to_response(verification: Verification) -> VerificationResponse:
+    prediction = verification.prediction
+    return VerificationResponse(
+        status=verification.status,
+        latency_ms=verification.latency_ms,
+        reason=verification.reason,
+        label=prediction.label if prediction else None,
+        fire_score=prediction.fire_score if prediction else None,
+        threshold=prediction.threshold if prediction else None,
+        scores=prediction.scores if prediction else None,
+    )

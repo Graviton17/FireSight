@@ -8,6 +8,7 @@ from app.data_layer.data_classes.fire_station import FireStation, NearbyFireStat
 from app.data_layer.data_classes.sensor_reading import SensorReading
 from app.services.device_service import DeviceService
 from app.services.fire_station_service import FireStationService
+from app.services.fire_verification_service import FireVerificationService, Verification
 from app.services.phone_location_service import PhoneLocationService
 from app.services.sensor_reading_service import SensorReadingService
 from main import app
@@ -117,4 +118,15 @@ def test_lookup_failure_does_not_fail_post(client, monkeypatch):
     monkeypatch.setattr(FireStationService, "nearest", staticmethod(boom))
     res = client.post("/api/v1/sensor-data", json=_reading(True))
     assert res.status_code == 201
+    assert res.json()["nearest_fire_stations"] == []
+
+
+def test_model_rejected_fire_returns_no_stations(client, monkeypatch):
+    async def rejected(fire):
+        return Verification(status="rejected", buzz=False)
+
+    monkeypatch.setattr(FireVerificationService, "verify", staticmethod(rejected))
+    res = client.post("/api/v1/sensor-data", json=_reading(True))
+    assert res.status_code == 201
+    assert res.json()["buzz"] is False
     assert res.json()["nearest_fire_stations"] == []

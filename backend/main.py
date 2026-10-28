@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
+from app.core.detection import FireClassifier
 from app.core.errors import register_exception_handlers
 from app.data_layer.database_manager import DatabaseManager
 from app.services.fire_capture_service import FireCaptureService
@@ -40,6 +41,11 @@ async def lifespan(app: FastAPI):
     # camera timeout. The result shows up in the log a moment later.
     camera_check = asyncio.create_task(FireCaptureService.check_camera())
     location_check = asyncio.create_task(PhoneLocationService.check())
+
+    # Loaded before serving so the first fire POST doesn't wait for it. First
+    # start downloads the weights (~110 MB). On failure fire POSTs still get
+    # buzz=true (verification "unavailable").
+    await asyncio.to_thread(FireClassifier.load_from_config)
 
     yield
 

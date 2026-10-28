@@ -13,19 +13,31 @@ from app.api.v1.schemas import (
     fire_image_to_response,
     nearby_fire_station_to_response,
     sensor_reading_to_response,
+    verification_to_response,
 )
 from app.data_layer.data_classes.fire_image import FireImage
+from app.data_layer.data_classes.fire_station import NearbyFireStation
 from app.data_layer.data_classes.sensor_reading import SensorReading
 from app.services.fire_capture_service import FireCaptureService
 from app.services.fire_station_service import FireStationService
+from app.services.fire_verification_service import FireVerificationService
 from app.services.sensor_reading_service import SensorReadingService
+from app.telemetries.logger import logger
 
 router = APIRouter(prefix="/sensor-data", tags=["Sensor Data"])
 
 
 async def _signed_images(images: List[FireImage]) -> List[FireImageResponse]:
-    urls = await asyncio.gather(*(FireCaptureService.signed_url(image) for image in images))
-    return [fire_image_to_response(image, url) for image, url in zip(images, urls, strict=True)]
+    if not images:
+        return []
+    urls, detections = await asyncio.gather(
+        asyncio.gather(*(FireCaptureService.signed_url(image) for image in images)),
+        FireCaptureService.get_detections_for_images([image.id for image in images]),
+    )
+    return [
+        fire_image_to_response(image, url, detections.get(image.id))
+        for image, url in zip(images, urls, strict=True)
+    ]
 
 
 async def _readings_with_images(readings: List[SensorReading]) -> List[SensorReadingResponse]:
@@ -35,32 +47,58 @@ async def _readings_with_images(readings: List[SensorReading]) -> List[SensorRea
     return [sensor_reading_to_response(r, signed.get(r.id)) for r in readings]
 
 
+async def _nearest_stations(device_id: str, fire: bool) -> List[NearbyFireStation]:
+    if not fire:
+        return []
+    return await FireStationService.nearest_for_alarm(device_id)
+
+
 @router.post("", response_model=SensorReadingCreateResponse, status_code=201)
 async def create_sensor_reading(request_data: SensorReadingCreateRequest, background_tasks: BackgroundTasks):
-    """Store one reading from an ESP32.
+    """Store one reading from an ESP32 and tell it whether to buzz.
 
-    On ``fire: true`` a phone-camera snapshot is captured in the background
-    after the response is sent, so the device's short HTTP timeout is safe,
-    and the nearest fire stations are returned in the response.
+    On ``fire: true`` the phone camera snapshot is checked by the image model
+    (second verification) before answering; ``buzz`` is the final decision.
+    When it buzzes, the nearest fire stations come back too.
+    The image and verdict are stored after the response is sent.
     """
-    reading = await SensorReadingService.record_reading(
-        device_id=request_data.device_id,
-        smoke=request_data.smoke,
-        flame=request_data.flame,
-        temperature=request_data.temperature,
-        fire=request_data.fire,
+    # Saving the reading, verifying and the station lookup run side by side:
+    # the ESP32 gives up after 5 s and verification alone may take 4.
+    reading, verification, stations = await asyncio.gather(
+        SensorReadingService.record_reading(
+            device_id=request_data.device_id,
+            smoke=request_data.smoke,
+            flame=request_data.flame,
+            temperature=request_data.temperature,
+            fire=request_data.fire,
+        ),
+        FireVerificationService.verify(request_data.fire),
+        _nearest_stations(request_data.device_id, request_data.fire),
     )
 
-    capture = reading.fire and FireCaptureService.claim_capture_slot(reading.device_id)
-    if capture:
-        background_tasks.add_task(FireCaptureService.capture_for_reading, reading)
-
-    stations = await FireStationService.nearest_for_alarm(reading.device_id) if reading.fire else []
+    if verification.status != "not_needed":
+        prediction = verification.prediction
+        logger.warning(
+            "Fire verification",
+            device_id=reading.device_id,
+            status=verification.status,
+            buzz=verification.buzz,
+            label=prediction.label if prediction else None,
+            fire_score=prediction.fire_score if prediction else None,
+            reason=verification.reason,
+            latency_ms=verification.latency_ms,
+        )
+    if verification.image is not None:
+        background_tasks.add_task(FireVerificationService.store, reading, verification)
 
     return SensorReadingCreateResponse(
         **asdict(reading),
-        image_capture_scheduled=capture,
-        nearest_fire_stations=[nearby_fire_station_to_response(s) for s in stations],
+        buzz=verification.buzz,
+        verification=verification_to_response(verification),
+        # The model rejecting the fire means no alarm, so no stations to call.
+        nearest_fire_stations=(
+            [nearby_fire_station_to_response(s) for s in stations] if verification.buzz else []
+        ),
     )
 
 

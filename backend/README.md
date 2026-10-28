@@ -11,17 +11,19 @@ app/
   core/errors/              {"error": {code, message}} envelope
   core/camera/              IP Webcam (Android) snapshot client
   core/storage/             fire-images bucket adapter
+  core/detection/           fire image classifier (torch/transformers)
   api/v1/
     router.py               aggregates routers
     sensor_routes.py        /api/v1/sensor-data endpoints
     schemas/                Pydantic request/response models
-  services/                 SensorReadingService, FireCaptureService
+  services/                 SensorReadingService, FireCaptureService, FireVerificationService
   data_layer/
     database_manager.py     singleton holding Supabase + CRUD instances
     crud/                   BaseCrud + SensorReadingCrud
     data_classes/           one dataclass per table
-supabase/migrations/        sensor_readings, fire_images (+ bucket), fire_stations, devices
+supabase/migrations/        sensor_readings, fire_images, fire_detections, fire_stations, devices; fire-images bucket
 scripts/fire_stations/      Google Maps scrape + importer for Gujarat fire stations
+models/                     local model weights (gitignored, see 'Fire model')
 tests/
 ```
 
@@ -55,36 +57,72 @@ tests/
      "snapshot_path": "/shot.jpg",
      "username": "",
      "password": "",
-     "timeout_seconds": 10,
-     "capture_interval_seconds": 10
+     "timeout_seconds": 3
    }
    ```
 
    - `snapshot_path`: `/shot.jpg` = current video frame (fast); `/photo.jpg` =
      full-resolution photo with autofocus (slower).
    - `username`/`password`: only if you set a login in IP Webcam.
-   - `capture_interval_seconds`: while the fire continues the ESP32 posts every
-     5 s; this caps captures to one per device per interval.
 
    **Changing the IP on the fly:** the `camera` section is re-read whenever
    `config.json` is saved, so just edit `base_url` (or any camera setting) and
    save. No restart needed; the next fire capture uses the new value. (If
    `FIRESIGHT_CAMERA_URL` is set in the environment it always wins.)
 
-When a POST has `"fire": true`, the backend replies immediately with
-`"image_capture_scheduled": true`, then grabs the snapshot in the background,
-uploads it to `fire-images/{device_id}/{date}/{reading_id}.jpg`, and inserts a
-row in `fire_images` (`reading_id`, `device_id`, `bucket`, `storage_path`,
-`content_type`, `size_bytes`, `captured_at`, all NOT NULL; one image per
-reading). GET endpoints return it as `image` on the reading, with a signed
-`url` (valid 1 hour). If the phone is unreachable the error is logged and the next fire
-reading retries.
+## Fire model (second verification)
+
+The sensors are the first check. When the ESP32 reports `"fire": true`, the
+backend grabs a phone snapshot, runs the image classifier
+[`prithivMLmods/Fire-Detection-Siglip2`](https://huggingface.co/prithivMLmods/Fire-Detection-Siglip2)
+(labels `fire`, `normal`, `smoke`; 99.4% accuracy on its own test set), and
+answers the POST with `buzz`. The model runs locally on CPU, well inside the
+ESP32's 5 s timeout.
+
+**Download the model once** (~370 MB, into `models/`, which is gitignored):
+
+```bash
+D=models/Fire-Detection-Siglip2; mkdir -p $D
+B=https://huggingface.co/prithivMLmods/Fire-Detection-Siglip2/resolve/main
+for f in config.json preprocessor_config.json model.safetensors; do curl -L -o $D/$f $B/$f; done
+```
+
+It is loaded from that folder at startup (`Fire model loaded` in the log); the
+server never downloads anything at runtime.
+
+```json
+"detection": {
+  "enabled": true,
+  "model_path": "models/Fire-Detection-Siglip2",
+  "fire_labels": ["fire", "smoke"],
+  "threshold": 0.7,
+  "timeout_seconds": 4,
+  "device": "cpu"
+}
+```
+
+- `fire_score` = sum of the `fire_labels` probabilities; fire is confirmed when
+  `fire_score >= threshold`. `threshold` and `timeout_seconds` change live when
+  config.json is saved.
+- `timeout_seconds`: budget for camera + model. Keep it under the ESP32's 5 s.
+
+| `verification.status` | When | `buzz` |
+| --- | --- | --- |
+| `not_needed` | sensors say no fire | `false` |
+| `confirmed` | model sees fire/smoke | `true` |
+| `rejected` | model sees no fire | `false` |
+| `unavailable` | camera down, model not loaded/failed, or timeout | `true` (fail-safe) |
+
+After the response, the snapshot goes to the `fire-images` bucket +
+`fire_images` row, and the verdict to `fire_detections` (label, fire_score,
+threshold, all scores, inference time). GET endpoints return the image with a
+signed `url` and its `detection`.
 
 ## Endpoints
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/api/v1/sensor-data` | Body: `device_id`, `smoke`, `flame`, `temperature` (nullable), `fire`. Returns 201 with the reading + `image_capture_scheduled` + `nearest_fire_stations` (filled when `fire` is true). |
+| POST | `/api/v1/sensor-data` | Body: `device_id`, `smoke`, `flame`, `temperature` (nullable), `fire`. Returns 201 with the reading, `buzz`, `verification` and `nearest_fire_stations` (filled when `buzz` is true). |
 | GET | `/api/v1/sensor-data/{device_id}/latest` | Latest reading (with `image` if one was captured), 404 if none. |
 | GET | `/api/v1/sensor-data/{device_id}/images?page=&page_size=` | Fire snapshots, newest first, with signed URLs. |
 | GET | `/api/v1/sensor-data/{device_id}?page=&page_size=` | History, newest first. |
@@ -124,12 +162,27 @@ anything outside Gujarat and permanently closed places, and upserts on Google
 `place_id`, so re-running after a new scrape updates rows instead of duplicating
 them. Add anything the scrape missed with `POST /api/v1/fire-stations`.
 
-**On a fire alarm:** register each device's location once
-(`PUT /api/v1/devices/esp32-fire-01` with its lat/lng). When a reading arrives
-with `fire: true`, the backend looks up the 3 nearest stations, logs the
-closest one (name, phone, distance, Maps link), and returns them in the POST
-response as `nearest_fire_stations`. The lookup uses a PostGIS index (no full
-table scan); distances are straight-line, not road.
+**Device location:** comes from the IP Webcam phone's GPS (the phone sits next
+to the ESP32). Tick **Get location** on the phone's Sensors page
+(`http://<phone-ip>:8080/sensors.html`); startup logs `Phone location OK` with a
+Maps link. Fixes worse than `camera.location_max_accuracy_m` (50 m) are ignored.
+A location pinned by hand with `PUT /api/v1/devices/{device_id}` always wins.
+With several devices, set `camera.device_id` so only the one next to the phone
+uses its GPS.
+
+**Device location:** comes from the IP Webcam phone's GPS (the phone sits next
+to the ESP32). Tick **Get location** on the phone's Sensors page
+(`http://<phone-ip>:8080/sensors.html`); startup logs `Phone location OK` with a
+Maps link. Fixes worse than `camera.location_max_accuracy_m` (50 m) are ignored.
+A location pinned by hand with `PUT /api/v1/devices/{device_id}` always wins.
+With several devices, set `camera.device_id` so only the one next to the phone
+uses its GPS.
+
+**On a fire alarm:** the station lookup runs alongside the image verification.
+If the alarm buzzes, the backend logs the fire's location and the nearest
+station (name, phone, distance, Maps link) and returns the 3 nearest in the
+POST response as `nearest_fire_stations`. The lookup uses a PostGIS index (no
+full table scan); distances are straight-line, not road.
 
 ## Tests
 
