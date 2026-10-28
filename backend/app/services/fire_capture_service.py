@@ -1,28 +1,24 @@
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from app.core.camera import CameraError, IpWebcamClient
 from app.core.storage import FireImageLimits, FireImageStorage
+from app.data_layer.crud.fire_detection_crud import FireDetectionCrud
 from app.data_layer.crud.fire_image_crud import FireImageCrud
+from app.data_layer.data_classes.fire_detection import FireDetection
 from app.data_layer.data_classes.fire_image import FireImage
 from app.data_layer.data_classes.sensor_reading import SensorReading
 from app.data_layer.database_manager import DatabaseManager
-from app.static_memory_cache import StaticMemoryCache
 from app.telemetries.logger import logger
-
-# device_id -> time.monotonic() of the last capture slot handed out. In-memory:
-# a restart just allows one extra capture.
-_last_capture_at: Dict[str, float] = {}
 
 
 class FireCaptureService:
-    """Grab a snapshot from the phone camera when a device reports fire.
+    """Phone-camera snapshots: health check, storage, and lookups.
 
-    Routes call :meth:`claim_capture_slot` synchronously, then run
-    :meth:`capture_for_reading` as a background task so the ESP32 gets its
-    response without waiting for the phone or the upload. Each stored image
-    gets a row in ``fire_images`` linking it to its reading.
+    Capturing and classifying happen in ``FireVerificationService`` while the
+    ESP32 waits; this service stores the result afterwards in the
+    ``fire-images`` bucket plus a ``fire_images`` row.
     """
 
     @staticmethod
@@ -31,6 +27,13 @@ class FireCaptureService:
         if images is None:
             raise RuntimeError("FireImage CRUD has not been initialised")
         return images
+
+    @staticmethod
+    def _detections_crud() -> FireDetectionCrud:
+        detections = DatabaseManager.get_instance().fire_detections
+        if detections is None:
+            raise RuntimeError("FireDetection CRUD has not been initialised")
+        return detections
 
     @staticmethod
     async def check_camera() -> bool:
@@ -62,52 +65,19 @@ class FireCaptureService:
         return True
 
     @staticmethod
-    def claim_capture_slot(device_id: str) -> bool:
-        """True if this reading should trigger a capture.
-
-        At most one capture per device per ``camera.capture_interval_seconds``;
-        the firmware re-posts every few seconds while the alarm is on. No await
-        between the check and the write, so concurrent requests can't both win.
-        """
-        if not StaticMemoryCache.get_camera_base_url():
-            return False
-        now = time.monotonic()
-        last = _last_capture_at.get(device_id)
-        if last is not None and now - last < StaticMemoryCache.get_camera_capture_interval_seconds():
-            return False
-        _last_capture_at[device_id] = now
-        return True
-
-    @staticmethod
-    def release_capture_slot(device_id: str) -> None:
-        """Forget a failed capture so the next fire reading retries straight away."""
-        _last_capture_at.pop(device_id, None)
-
-    @staticmethod
-    async def capture_for_reading(reading: SensorReading) -> Optional[FireImage]:
-        """Capture, upload and record an image for *reading*.
+    async def store_image(
+        reading: SensorReading, image: bytes, captured_at: datetime
+    ) -> Optional[FireImage]:
+        """Upload *image* and record it for *reading*.
 
         Runs in the background, so it logs failures instead of raising.
         """
-        camera = IpWebcamClient.from_config()
-        if camera is None:
-            return None
-
-        try:
-            image = await camera.capture_jpeg()
-        except CameraError as e:
-            FireCaptureService.release_capture_slot(reading.device_id)
-            logger.error("Fire image capture failed", device_id=reading.device_id, error=str(e))
-            return None
-
-        captured_at = datetime.now(UTC)
         storage = FireImageStorage()
         object_path = FireImageStorage.object_path_for(reading.device_id, reading.id, captured_at)
 
         try:
             await storage.upload(object_path=object_path, file_content=image)
         except Exception as e:
-            FireCaptureService.release_capture_slot(reading.device_id)
             logger.error("Fire image upload failed", device_id=reading.device_id, exc_info=e)
             return None
 
@@ -124,7 +94,6 @@ class FireCaptureService:
         except Exception as e:
             # Don't leave an object in the bucket that no row points to.
             await storage.delete(object_path)
-            FireCaptureService.release_capture_slot(reading.device_id)
             logger.error("Fire image record failed", device_id=reading.device_id, exc_info=e)
             return None
 
@@ -144,6 +113,14 @@ class FireCaptureService:
             return await FireCaptureService._images_crud().get_by_reading_ids(reading_ids)
         except Exception as e:
             logger.error("Error getting fire images for readings", exc_info=e)
+            raise
+
+    @staticmethod
+    async def get_detections_for_images(image_ids: List[str]) -> Dict[str, FireDetection]:
+        try:
+            return await FireCaptureService._detections_crud().get_by_image_ids(image_ids)
+        except Exception as e:
+            logger.error("Error getting detections for images", exc_info=e)
             raise
 
     @staticmethod

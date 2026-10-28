@@ -3,8 +3,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.detection import FireClassifier
 from app.data_layer.data_classes.sensor_reading import SensorReading
-from app.services.fire_capture_service import FireCaptureService
 from app.services.sensor_reading_service import SensorReadingService
 from app.static_memory_cache import StaticMemoryCache
 from main import app
@@ -27,14 +27,12 @@ def client(monkeypatch):
         stored.append(reading)
         return reading
 
-    async def no_capture(reading):
-        return None
-
     monkeypatch.setattr(SensorReadingService, "record_reading", staticmethod(fake_record_reading))
     # Never touch the real phone camera from config.json.
     monkeypatch.setattr(StaticMemoryCache, "config", {})
     monkeypatch.setattr(StaticMemoryCache, "reload_if_changed", classmethod(lambda cls: False))
-    monkeypatch.setattr(FireCaptureService, "capture_for_reading", staticmethod(no_capture))
+    # No model: fire posts get the fail-safe answer without touching a camera.
+    monkeypatch.setattr(FireClassifier, "get", classmethod(lambda cls: None))
     # No `with` block: the lifespan (and its Supabase connection) never runs.
     test_client = TestClient(app)
     test_client.stored = stored  # type: ignore[attr-defined]
@@ -46,6 +44,8 @@ def test_post_stores_reading(client):
     assert res.status_code == 201
     assert res.json()["id"] == "r-1"
     assert res.json()["fire"] is True
+    assert res.json()["buzz"] is True
+    assert res.json()["verification"]["status"] == "unavailable"
     assert len(client.stored) == 1
 
 
@@ -54,6 +54,8 @@ def test_post_accepts_null_temperature(client):
     res = client.post("/api/v1/sensor-data", json=body)
     assert res.status_code == 201
     assert res.json()["temperature"] is None
+    assert res.json()["buzz"] is False
+    assert res.json()["verification"]["status"] == "not_needed"
 
 
 def test_post_rejects_out_of_range_adc(client):

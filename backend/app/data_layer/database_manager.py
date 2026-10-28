@@ -7,6 +7,7 @@
 
 from typing import Optional, Tuple
 
+from app.data_layer.crud.fire_detection_crud import FireDetectionCrud
 from app.data_layer.crud.fire_image_crud import FireImageCrud
 from app.data_layer.crud.sensor_reading_crud import SensorReadingCrud
 from app.data_layer.supabase_client import SupabaseClient
@@ -31,11 +32,13 @@ class DatabaseManager:
     supabase: Optional[SupabaseClient]
     sensor_readings: Optional[SensorReadingCrud]
     fire_images: Optional[FireImageCrud]
+    fire_detections: Optional[FireDetectionCrud]
 
     def __init__(self) -> None:
         self.supabase = None
         self.sensor_readings = None
         self.fire_images = None
+        self.fire_detections = None
 
     # ------------------------------------------------------------------
     # Async initialisation
@@ -52,6 +55,7 @@ class DatabaseManager:
         self.supabase = await SupabaseClient.create(supabase_url, supabase_key)
         self.sensor_readings = SensorReadingCrud(self.supabase)
         self.fire_images = FireImageCrud(self.supabase)
+        self.fire_detections = FireDetectionCrud(self.supabase)
 
     # ------------------------------------------------------------------
     # Accessors
@@ -82,4 +86,5 @@ class DatabaseManager:
             self.supabase = None
             self.sensor_readings = None
             self.fire_images = None
+            self.fire_detections = None
         DatabaseManager._instance = None

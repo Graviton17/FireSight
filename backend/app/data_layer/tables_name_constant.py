@@ -10,3 +10,4 @@ class TablesNameConstant:
 
     SENSOR_READINGS = "sensor_readings"
     FIRE_IMAGES = "fire_images"
+    FIRE_DETECTIONS = "fire_detections"

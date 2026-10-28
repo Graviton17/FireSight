@@ -12,10 +12,10 @@ const char* WIFI_PASS = "Graviton@17Hmm";
 
 // ---------- Server ----------
 // FireSight backend (backend/main.py). Replace the IP with your PC's LAN IP.
-const char* SERVER_URL = "http://10.16.168.123:8000/api/v1/sensor-data";
-#define HTTP_TIMEOUT_MS 3000
+const char* SERVER_URL = "http://10.29.223.173:8000/api/v1/sensor-data";
+#define HTTP_TIMEOUT_MS 5000       // server verifies fire with the camera before answering
 #define DEVICE_ID "esp32-fire-01"
-#define POST_INTERVAL_MS 10000      // also posts immediately when alarm state changes
+#define POST_INTERVAL_MS 5000      // also posts immediately when alarm state changes
 
 // ---------- Pins ----------
 #define PIN_NTC 32
@@ -33,7 +33,7 @@ const char* SERVER_URL = "http://10.16.168.123:8000/api/v1/sensor-data";
 
 // ---------- Fire thresholds (TUNE THESE) ----------
 #define SMOKE_THRESHOLD 1500       // smoke vote when raw ADC  >  this (0-4095)
-#define FLAME_THRESHOLD 1500       // flame vote when raw ADC  <  this (0-4095)
+#define FLAME_THRESHOLD 1000       // flame vote when raw ADC  <  this (0-4095)
 #define TEMP_ALARM_C 57.0          // fixed-temperature alarm point
 #define TEMP_ROR_C_PER_MIN 8.3     // rate-of-rise alarm point
 
@@ -67,6 +67,11 @@ int tempHistCount = 0;
 bool fireAlarm = false;
 int alarmCount = 0;
 int clearCount = 0;
+
+// Second verification: the server checks the phone camera and answers "buzz".
+// PENDING only lasts while the POST is in flight (max HTTP_TIMEOUT_MS).
+enum ServerVerdict { VERDICT_PENDING, VERDICT_BUZZ, VERDICT_SILENT };
+ServerVerdict serverVerdict = VERDICT_PENDING;
 
 // Average several ADC samples (raw counts) to reduce noise
 int readAveragedRaw(int pin) {
@@ -131,16 +136,18 @@ bool evaluateFire(int smoke, int flame, float tempC, float rise, bool &warning) 
 
   int votes = (int)smokeHigh + (int)flameSeen + (int)heat;
 
-  bool fire = (votes == 3);
+  bool fire = (votes == 1);
   warning = (votes >= 1) && !fire;
   return fire;
 }
 
-// Buzzer is ON only when there is a fire AND the switch is not pressed.
+// Buzzer is ON only when the sensors see fire, the server says buzz (or could not
+// be reached), AND the switch is not pressed.
 // Called every loop pass so the buzzer reacts to the switch immediately.
 void applyBuzzer() {
   bool switchPressed = (digitalRead(PIN_SWITCH) == LOW);   // INPUT_PULLUP: pressed = LOW
-  digitalWrite(PIN_BUZZER, (fireAlarm && !switchPressed) ? BUZZER_ON : BUZZER_OFF);
+  bool confirmed = (serverVerdict == VERDICT_BUZZ);
+  digitalWrite(PIN_BUZZER, (fireAlarm && confirmed && !switchPressed) ? BUZZER_ON : BUZZER_OFF);
 }
 
 // Debounce + latch the alarm state.
@@ -148,7 +155,10 @@ void updateAlarm(bool fireNow) {
   if (fireNow) {
     clearCount = 0;
     if (alarmCount < CONFIRM_CYCLES) alarmCount++;
-    if (alarmCount >= CONFIRM_CYCLES) fireAlarm = true;
+    if (alarmCount >= CONFIRM_CYCLES && !fireAlarm) {
+      fireAlarm = true;
+      serverVerdict = VERDICT_PENDING;   // wait for the server's camera check
+    }
   } else {
     alarmCount = 0;
     if (fireAlarm) {
@@ -156,6 +166,7 @@ void updateAlarm(bool fireNow) {
       if (clearCount >= CLEAR_CYCLES) {
         fireAlarm = false;
         clearCount = 0;
+        serverVerdict = VERDICT_PENDING;
       }
     }
   }
@@ -169,8 +180,22 @@ void blinkLed() {
   digitalWrite(PIN_LED, LED_OFF);
 }
 
-// Sends sensor readings as JSON via HTTP POST. Returns true on 2xx response.
-bool postSensorData(int smoke, int flame, float tempC, bool fire) {
+// Reads "buzz" from the server's JSON reply, e.g. {...,"buzz":true,...}.
+// Missing or unreadable -> true (fail-safe: trust the sensors).
+bool parseBuzz(const String &body) {
+  int i = body.indexOf("\"buzz\"");
+  if (i < 0) return true;
+  i = body.indexOf(':', i);
+  if (i < 0) return true;
+  i++;
+  while (i < (int)body.length() && body[i] == ' ') i++;
+  return !body.startsWith("false", i);
+}
+
+// Sends sensor readings as JSON via HTTP POST. Returns true on 2xx response and
+// sets 'buzz' to the server's decision.
+bool postSensorData(int smoke, int flame, float tempC, bool fire, bool &buzz) {
+  buzz = true;   // fail-safe until the server says otherwise
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("POST skipped: WiFi not connected");
     return false;
@@ -207,6 +232,7 @@ bool postSensorData(int smoke, int flame, float tempC, bool fire) {
   if (code > 0) {
     Serial.print("POST response code: ");
     Serial.println(code);
+    if (code >= 200 && code < 300) buzz = parseBuzz(http.getString());
   } else {
     Serial.print("POST failed: ");
     Serial.println(HTTPClient::errorToString(code));
@@ -257,7 +283,19 @@ void checkSensors() {
   if (fireAlarm != lastFireState || now - lastPost >= POST_INTERVAL_MS) {
     lastFireState = fireAlarm;
     lastPost = now;
-    if (postSensorData(smokeValue, flameValue, tempC, fireAlarm)) {
+    bool buzz = true;
+    bool ok = postSensorData(smokeValue, flameValue, tempC, fireAlarm, buzz);
+
+    if (fireAlarm) {
+      // Server unreachable -> buzz anyway (fail-safe). Otherwise obey the camera check.
+      serverVerdict = (!ok || buzz) ? VERDICT_BUZZ : VERDICT_SILENT;
+      applyBuzzer();   // before the LED blink, which blocks
+      Serial.print("Camera verification: ");
+      Serial.println(!ok ? "server unreachable -> BUZZ (fail-safe)"
+                         : (buzz ? "fire confirmed -> BUZZ" : "no fire in image -> SILENT"));
+    }
+
+    if (ok) {
       Serial.println("reached");
       blinkLed();   // blink only when the server returned 2xx
     }

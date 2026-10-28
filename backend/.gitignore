@@ -23,3 +23,6 @@ config.json
 
 # ---- Testing ----
 .pytest_cache/
+
+# ---- Model weights (download, see README) ----
+models/

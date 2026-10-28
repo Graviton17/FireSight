@@ -18,8 +18,15 @@
     "snapshot_path": "/shot.jpg",
     "username": "",
     "password": "",
-    "timeout_seconds": 10,
-    "capture_interval_seconds": 10
+    "timeout_seconds": 3
+  },
+  "detection": {
+    "enabled": true,
+    "model_path": "models/Fire-Detection-Siglip2",
+    "fire_labels": ["fire", "smoke"],
+    "threshold": 0.7,
+    "timeout_seconds": 4,
+    "device": "cpu"
   },
   "logging": {
     "log_level": "INFO"
