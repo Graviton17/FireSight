@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import type { Map as LeafletMap } from 'leaflet'
 
 import { api, type Bounds, type MapDevice, type MapFireStation } from '@/api'
+import { useLiveEvents } from '@/hooks/useLiveEvents'
 import { usePolled } from '@/hooks/usePolled'
 
-// Live device status; stations' alert counts ride along.
+// Live device status; stations' alert counts ride along. Incidents starting or
+// ending refresh at once (live events); this poll is the fallback.
 const REFRESH_MS = 10_000
 const MOVE_DEBOUNCE_MS = 250
 
@@ -55,7 +57,7 @@ export function useViewportData(map: LeafletMap | null): ViewportData {
   }, [map])
 
   const key = bounds ? JSON.stringify(bounds) : null
-  const { data, error, loading } = usePolled(
+  const { data, error, loading, refresh } = usePolled(
     key,
     async (signal) => {
       const [stations, devices] = await Promise.all([
@@ -66,6 +68,9 @@ export function useViewportData(map: LeafletMap | null): ViewportData {
     },
     REFRESH_MS,
   )
+  useLiveEvents((e) => {
+    if (e.kind === 'alert') refresh()
+  })
 
   // Keep showing the previous viewport's markers until the new ones arrive.
   const [last, setLast] = useState(data)

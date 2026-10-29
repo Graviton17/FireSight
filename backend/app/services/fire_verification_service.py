@@ -9,6 +9,7 @@ from app.core.detection import FireClassifier, FirePrediction
 from app.data_layer.data_classes.sensor_reading import SensorReading
 from app.data_layer.database_manager import DatabaseManager
 from app.services.fire_capture_service import FireCaptureService
+from app.services.live_events import LiveEvents
 from app.static_memory_cache import StaticMemoryCache
 from app.telemetries.logger import logger
 
@@ -16,7 +17,9 @@ from app.telemetries.logger import logger
 # confirmed   : the image model also sees fire/smoke             -> buzz true
 # rejected    : the image model sees no fire                     -> buzz false
 # unavailable : camera / model / timeout problem, can't verify   -> buzz true (fail-safe)
-VerificationStatus = Literal["not_needed", "confirmed", "rejected", "unavailable"]
+# incident_live: already confirmed, button not pressed yet;
+#               the camera isn't used again                     -> buzz true
+VerificationStatus = Literal["not_needed", "confirmed", "rejected", "unavailable", "incident_live"]
 
 
 @dataclass
@@ -101,8 +104,17 @@ class FireVerificationService:
             return
 
         image = await FireCaptureService.store_image(reading, verification.image, verification.captured_at)
+        if image is None:
+            return
+        try:
+            await FireVerificationService._store_detection(image.id, reading, verification)
+        finally:
+            LiveEvents.publish("image", reading.device_id)
+
+    @staticmethod
+    async def _store_detection(image_id: str, reading: SensorReading, verification: Verification) -> None:
         prediction = verification.prediction
-        if image is None or prediction is None:
+        if prediction is None:
             return
 
         detections = DatabaseManager.get_instance().fire_detections
@@ -111,7 +123,7 @@ class FireVerificationService:
             return
         try:
             await detections.create_detection(
-                image_id=image.id,
+                image_id=image_id,
                 reading_id=reading.id,
                 device_id=reading.device_id,
                 model=prediction.model,

@@ -62,6 +62,7 @@ class FireAlertResponse(BaseModel):
     temperature: Optional[float] = None
     fire_score: Optional[float] = None
     created_at: Optional[str] = None
+    resolved_at: Optional[str] = None  # null while the incident is live
     # Filled on the station's list
     device_name: Optional[str] = None
     # Filled on the device's list

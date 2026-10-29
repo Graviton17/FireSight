@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
-import { ChevronRight, Cpu, ExternalLink, FireExtinguisher, Flame, Phone, Thermometer, Wind } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { BellRing, CheckCircle2, ChevronRight, Cpu, ExternalLink, FireExtinguisher, Flame, Phone, Thermometer, Wind } from 'lucide-react'
 
 import { ApiError, api, type FireAlert, type FireImage, type SensorReading } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useLiveEvents } from '@/hooks/useLiveEvents'
 import { usePolled } from '@/hooks/usePolled'
 import { deviceState, formatDateTime, formatKm, formatPercent, formatShort, formatTemp, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -18,12 +19,14 @@ interface Props {
   onAlerts: (alerts: FireAlert[]) => void
 }
 
-// The device posts every 5 s, so its live reading refreshes as often.
+// Live events refetch the moment the device posts or an incident starts/ends;
+// these polls are the fallback when the event stream is down.
 const LIVE_REFRESH_MS = 5_000
 // Triggers change rarely, and every snapshot needs a signed URL from storage.
 const HISTORY_REFRESH_MS = 30_000
 
 export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Props) {
+  const [incidentLive, setIncidentLive] = useState(false)
   const live = usePolled(
     deviceId,
     async (signal) => {
@@ -45,12 +48,22 @@ export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Pr
       const [alerts, images] = await Promise.all([api.deviceAlerts(deviceId, signal), api.deviceImages(deviceId, signal)])
       return { alerts, images }
     },
-    HISTORY_REFRESH_MS,
+    incidentLive ? LIVE_REFRESH_MS : HISTORY_REFRESH_MS,
   )
+
+  useLiveEvents((e) => {
+    if (e.device_id !== deviceId) return
+    if (e.kind === 'reading') live.refresh()
+    else history.refresh()
+  })
 
   useEffect(() => {
     if (history.data) onAlerts(history.data.alerts.items)
   }, [history.data, onAlerts])
+
+  // Render-time adjustment, no extra effect pass.
+  const liveNow = history.data?.alerts.items.some(isLive) ?? false
+  if (liveNow !== incidentLive) setIncidentLive(liveNow)
 
   const error = live.error ?? history.error
   if (!live.data || !history.data) {
@@ -78,6 +91,7 @@ export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Pr
         {device?.name && <p className="font-mono text-xs text-muted-foreground">{deviceId}</p>}
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <StateBadge state={state} />
+          {alerts.items.some(isLive) && <IncidentBadge alert={alerts.items.find(isLive)!} />}
           <span className="text-xs text-muted-foreground">Last seen {timeAgo(latest?.created_at)}</span>
         </div>
       </header>
@@ -188,6 +202,24 @@ export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Pr
   )
 }
 
+const isLive = (a: FireAlert) => a.resolved_at == null
+
+/** Live until the button on the device is pressed; the buzzer sounds the whole time. */
+function IncidentBadge({ alert }: { alert: FireAlert }) {
+  if (isLive(alert)) {
+    return (
+      <Badge className="bg-destructive text-white" title="Buzzer on until the button on the device is pressed">
+        <BellRing className="animate-pulse" /> Live incident
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="outline" title={formatDateTime(alert.resolved_at)}>
+      <CheckCircle2 /> Resolved {timeAgo(alert.resolved_at)}
+    </Badge>
+  )
+}
+
 function StateBadge({ state }: { state: ReturnType<typeof deviceState> }) {
   if (state === 'fire') {
     return (
@@ -233,10 +265,13 @@ function ReadingTable({ readings }: { readings: SensorReading[] }) {
 
 function TriggerCard({ alert, image, onSelect }: { alert: FireAlert; image?: FireImage; onSelect: (a: FireAlert) => void }) {
   return (
-    <div className="rounded-lg border bg-background p-3">
-      <div className="text-sm">
-        <span className="font-medium tabular-nums">{formatDateTime(alert.created_at)}</span>
-        <span className="text-muted-foreground"> · {timeAgo(alert.created_at)}</span>
+    <div className={cn('rounded-lg border bg-background p-3', isLive(alert) && 'border-destructive ring-1 ring-destructive/30')}>
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <div className="text-sm">
+          <span className="font-medium tabular-nums">{formatDateTime(alert.created_at)}</span>
+          <span className="text-muted-foreground"> · {timeAgo(alert.created_at)}</span>
+        </div>
+        <IncidentBadge alert={alert} />
       </div>
 
       <button
@@ -263,13 +298,24 @@ function TriggerCard({ alert, image, onSelect }: { alert: FireAlert; image?: Fir
         )}
       </div>
 
-      <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-        <span className="flex items-center gap-1"><Wind className="size-3.5 text-muted-foreground" /> {alert.smoke}</span>
-        <span className="flex items-center gap-1"><Flame className="size-3.5 text-muted-foreground" /> {alert.flame}</span>
-        <span className="flex items-center gap-1"><Thermometer className="size-3.5 text-muted-foreground" /> {formatTemp(alert.temperature)}</span>
-      </div>
+      <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+        <SensorValue icon={<Wind />} label="Smoke" value={alert.smoke} />
+        <SensorValue icon={<Flame />} label="Flame" value={alert.flame} />
+        <SensorValue icon={<Thermometer />} label="Temp" value={formatTemp(alert.temperature)} />
+      </dl>
 
       {image && <Snapshot image={image} className="mt-3" />}
+    </div>
+  )
+}
+
+function SensorValue({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="flex items-center gap-1 text-muted-foreground [&_svg]:size-3.5">
+        {icon} {label}
+      </dt>
+      <dd className="font-medium tabular-nums">{value}</dd>
     </div>
   )
 }
@@ -287,6 +333,12 @@ function Snapshot({ image, className }: { image: FireImage; className?: string }
         {d ? (
           <span>
             Model: <strong className="text-foreground">{d.label}</strong> · fire {formatPercent(d.fire_score)}
+            {/* Confirmed below the threshold: detection.force_fire was on. */}
+            {d.fire_detected && d.fire_score < d.threshold && (
+              <Badge variant="outline" className="ml-1.5 h-4 px-1.5 text-[10px]" title="detection.force_fire was on">
+                test override
+              </Badge>
+            )}
           </span>
         ) : (
           <span>Model didn't run</span>

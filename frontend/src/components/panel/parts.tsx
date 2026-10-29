@@ -98,9 +98,12 @@ export function SectionTitle({ children, count }: { children: ReactNode; count?:
 export function VerificationBadge({ alert }: { alert: Pick<FireAlert, 'verification_status' | 'fire_score'> }) {
   if (alert.verification_status === 'confirmed') {
     return (
-      <Badge variant="default" title="The camera image model also saw fire or smoke">
+      <Badge
+        variant="default"
+        title={`The camera check confirmed the fire${alert.fire_score != null ? ` (model fire score ${formatPercent(alert.fire_score)})` : ''}`}
+      >
         <ShieldCheck />
-        Camera confirmed {formatPercent(alert.fire_score)}
+        Camera confirmed
       </Badge>
     )
   }

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import { useLiveEvents } from '@/hooks/useLiveEvents'
 import { usePolled } from '@/hooks/usePolled'
 import { formatDateTime, formatKm, formatTemp, timeAgo } from '@/lib/format'
 import { Empty, ErrorNote, Field, PanelShell, PanelSkeleton, SectionTitle, Stat, VerificationBadge } from './parts'
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export function StationPanel({ stationId, onClose, onSelectDevice, onAlerts }: Props) {
-  const { data, error } = usePolled(
+  const { data, error, refresh } = usePolled(
     stationId,
     async (signal) => {
       const [station, alerts] = await Promise.all([api.station(stationId, signal), api.stationAlerts(stationId, signal)])
@@ -26,6 +27,10 @@ export function StationPanel({ stationId, onClose, onSelectDevice, onAlerts }: P
     },
     10_000,
   )
+  // Any device may have called this station.
+  useLiveEvents((e) => {
+    if (e.kind === 'alert') refresh()
+  })
 
   useEffect(() => {
     if (data) onAlerts(data.alerts.items)

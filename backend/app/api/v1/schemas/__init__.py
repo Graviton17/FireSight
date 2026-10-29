@@ -30,6 +30,7 @@ from app.api.v1.schemas.map import (
     map_fire_station_to_response,
 )
 from app.api.v1.schemas.sensor_reading import (
+    IncidentResolveResponse,
     SensorReadingCreateRequest,
     SensorReadingCreateResponse,
     SensorReadingResponse,
@@ -66,6 +67,7 @@ __all__ = [
     "map_device_to_response",
     "map_fire_station_to_response",
     # Sensor reading
+    "IncidentResolveResponse",
     "SensorReadingCreateRequest",
     "SensorReadingCreateResponse",
     "SensorReadingResponse",

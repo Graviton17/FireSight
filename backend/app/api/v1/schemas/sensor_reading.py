@@ -55,6 +55,13 @@ class SensorReadingCreateResponse(SensorReadingResponse):
     nearest_fire_stations: List[NearbyFireStationResponse] = []
 
 
+class IncidentResolveResponse(BaseModel):
+    """Reply to the button press on the device."""
+
+    # Live incidents closed: 0 when there was none (pressing twice is fine).
+    resolved: int
+
+
 def sensor_reading_to_response(
     reading: SensorReading, image: Optional[FireImageResponse] = None
 ) -> SensorReadingResponse:

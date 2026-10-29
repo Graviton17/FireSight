@@ -15,7 +15,8 @@ const char* WIFI_PASS = "Graviton@17Hmm";
 const char* SERVER_URL = "http://10.29.223.123:8000/api/v1/sensor-data";
 #define HTTP_TIMEOUT_MS 5000       // server verifies fire with the camera before answering
 #define DEVICE_ID "esp32-fire-01"
-#define POST_INTERVAL_MS 5000      // also posts immediately when alarm state changes
+#define POST_INTERVAL_MS 2000      // also posts immediately when alarm state changes
+#define RESOLVE_RETRY_MS 5000      // retry telling the server about a button press
 
 // ---------- Pins ----------
 #define PIN_NTC 32
@@ -24,6 +25,8 @@ const char* SERVER_URL = "http://10.29.223.123:8000/api/v1/sensor-data";
 #define PIN_FLAME_AO 35
 #define PIN_LED 23
 #define PIN_SWITCH 21              // one leg to GPIO21, other leg to GND (no resistor needed)
+                                   // press = fire handled: buzzer off, incident resolved
+#define BUTTON_DEBOUNCE_MS 50
 
 #define BUZZER_ON  HIGH            // swap these if your buzzer module is active-LOW
 #define BUZZER_OFF LOW
@@ -33,7 +36,7 @@ const char* SERVER_URL = "http://10.29.223.123:8000/api/v1/sensor-data";
 
 // ---------- Fire thresholds (TUNE THESE) ----------
 #define SMOKE_THRESHOLD 1500       // smoke vote when raw ADC  >  this (0-4095)
-#define FLAME_THRESHOLD 1000       // flame vote when raw ADC  <  this (0-4095)
+#define FLAME_THRESHOLD 700       // flame vote when raw ADC  <  this (0-4095)
 #define TEMP_ALARM_C 57.0          // fixed-temperature alarm point
 #define TEMP_ROR_C_PER_MIN 8.3     // rate-of-rise alarm point
 
@@ -68,10 +71,15 @@ bool fireAlarm = false;
 int alarmCount = 0;
 int clearCount = 0;
 
-// Second verification: the server checks the phone camera and answers "buzz".
-// PENDING only lasts while the POST is in flight (max HTTP_TIMEOUT_MS).
-enum ServerVerdict { VERDICT_PENDING, VERDICT_BUZZ, VERDICT_SILENT };
-ServerVerdict serverVerdict = VERDICT_PENDING;
+// Live incident: the server confirmed the fire with the camera (or could not be
+// reached). The buzzer stays on until the button is pressed, even if the sensors
+// clear. While it is live the server doesn't take more photos.
+bool incidentLive = false;
+// After the button press a new alarm waits until the sensors read clear once,
+// so a fire that is still burning doesn't re-trigger straight away.
+bool waitForClear = false;
+// The button was pressed but the server hasn't heard yet.
+bool resolvePending = false;
 
 // Average several ADC samples (raw counts) to reduce noise
 int readAveragedRaw(int pin) {
@@ -136,40 +144,54 @@ bool evaluateFire(int smoke, int flame, float tempC, float rise, bool &warning) 
 
   int votes = (int)smokeHigh + (int)flameSeen + (int)heat;
 
-  bool fire = (votes == 1);
+  bool fire = (votes == 3);
   warning = (votes >= 1) && !fire;
   return fire;
 }
 
-// Buzzer is ON only when the sensors see fire, the server says buzz (or could not
-// be reached), AND the switch is not pressed.
-// Called every loop pass so the buzzer reacts to the switch immediately.
+// Buzzer is ON for the whole live incident, until the button is pressed.
 void applyBuzzer() {
-  bool switchPressed = (digitalRead(PIN_SWITCH) == LOW);   // INPUT_PULLUP: pressed = LOW
-  bool confirmed = (serverVerdict == VERDICT_BUZZ);
-  digitalWrite(PIN_BUZZER, (fireAlarm && confirmed && !switchPressed) ? BUZZER_ON : BUZZER_OFF);
+  digitalWrite(PIN_BUZZER, incidentLive ? BUZZER_ON : BUZZER_OFF);
 }
 
-// Debounce + latch the alarm state.
+// Debounce the sensors' fire state. This only decides what is posted as "fire";
+// the buzzer follows the incident.
 void updateAlarm(bool fireNow) {
-  if (fireNow) {
+  if (!fireNow) waitForClear = false;
+  if (fireNow && !waitForClear) {
     clearCount = 0;
     if (alarmCount < CONFIRM_CYCLES) alarmCount++;
-    if (alarmCount >= CONFIRM_CYCLES && !fireAlarm) {
-      fireAlarm = true;
-      serverVerdict = VERDICT_PENDING;   // wait for the server's camera check
-    }
+    if (alarmCount >= CONFIRM_CYCLES) fireAlarm = true;
   } else {
     alarmCount = 0;
-    if (fireAlarm) {
-      clearCount++;
-      if (clearCount >= CLEAR_CYCLES) {
-        fireAlarm = false;
-        clearCount = 0;
-        serverVerdict = VERDICT_PENDING;
-      }
+    if (fireAlarm && ++clearCount >= CLEAR_CYCLES) {
+      fireAlarm = false;
+      clearCount = 0;
     }
   }
+  applyBuzzer();
+}
+
+// Checked every loop pass. Acts on the press, not the release.
+void pollButton() {
+  static bool lastPressed = false;
+  static unsigned long lastChange = 0;
+
+  bool pressed = (digitalRead(PIN_SWITCH) == LOW);   // INPUT_PULLUP: pressed = LOW
+  if (pressed == lastPressed || millis() - lastChange < BUTTON_DEBOUNCE_MS) return;
+  lastPressed = pressed;
+  lastChange = millis();
+  if (!pressed) return;
+
+  Serial.println(incidentLive ? "Button pressed -> incident resolved, buzzer OFF"
+                              : "Button pressed (no live incident)");
+  incidentLive = false;
+  fireAlarm = false;
+  alarmCount = 0;
+  clearCount = 0;
+  waitForClear = true;
+  // Sent even with no local incident: after a reboot the server may still have one.
+  resolvePending = true;
   applyBuzzer();
 }
 
@@ -192,35 +214,22 @@ bool parseBuzz(const String &body) {
   return !body.startsWith("false", i);
 }
 
-// Sends sensor readings as JSON via HTTP POST. Returns true on 2xx response and
-// sets 'buzz' to the server's decision.
-bool postSensorData(int smoke, int flame, float tempC, bool fire, bool &buzz) {
-  buzz = true;   // fail-safe until the server says otherwise
+// POSTs JSON to 'url'. Returns true on a 2xx response and puts its body in 'reply'.
+bool httpPostJson(const String &url, const String &payload, String &reply) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("POST skipped: WiFi not connected");
     return false;
   }
 
-  String payload = "{";
-  payload += "\"device_id\":\"" DEVICE_ID "\",";
-  payload += "\"smoke\":" + String(smoke) + ",";
-  payload += "\"flame\":" + String(flame) + ",";
-  payload += "\"temperature\":";
-  payload += isnan(tempC) ? String("null") : String(tempC, 1);
-  payload += ",\"fire\":";
-  payload += fire ? "true" : "false";
-  payload += "}";
-
   HTTPClient http;
   WiFiClientSecure secureClient;
   WiFiClient plainClient;
 
-  bool isHttps = String(SERVER_URL).startsWith("https://");
-  if (isHttps) {
+  if (url.startsWith("https://")) {
     secureClient.setInsecure();  // skips certificate check; use setCACert() in production
-    http.begin(secureClient, SERVER_URL);
+    http.begin(secureClient, url);
   } else {
-    http.begin(plainClient, SERVER_URL);
+    http.begin(plainClient, url);
   }
 
   http.setConnectTimeout(HTTP_TIMEOUT_MS);
@@ -232,7 +241,7 @@ bool postSensorData(int smoke, int flame, float tempC, bool fire, bool &buzz) {
   if (code > 0) {
     Serial.print("POST response code: ");
     Serial.println(code);
-    if (code >= 200 && code < 300) buzz = parseBuzz(http.getString());
+    if (code >= 200 && code < 300) reply = http.getString();
   } else {
     Serial.print("POST failed: ");
     Serial.println(HTTPClient::errorToString(code));
@@ -240,6 +249,43 @@ bool postSensorData(int smoke, int flame, float tempC, bool fire, bool &buzz) {
 
   http.end();
   return (code >= 200 && code < 300);
+}
+
+// Sends sensor readings as JSON via HTTP POST. Returns true on 2xx response and
+// sets 'buzz' to the server's decision.
+bool postSensorData(int smoke, int flame, float tempC, bool fire, bool &buzz) {
+  buzz = true;   // fail-safe until the server says otherwise
+
+  String payload = "{";
+  payload += "\"device_id\":\"" DEVICE_ID "\",";
+  payload += "\"smoke\":" + String(smoke) + ",";
+  payload += "\"flame\":" + String(flame) + ",";
+  payload += "\"temperature\":";
+  payload += isnan(tempC) ? String("null") : String(tempC, 1);
+  payload += ",\"fire\":";
+  payload += fire ? "true" : "false";
+  payload += "}";
+
+  String reply;
+  bool ok = httpPostJson(SERVER_URL, payload, reply);
+  if (ok) buzz = parseBuzz(reply);
+  return ok;
+}
+
+// Tells the server the button was pressed, closing the device's live incident.
+// Retried from loop() until it gets through.
+void sendResolve() {
+  static unsigned long lastTry = 0;
+  if (!resolvePending) return;
+  if (lastTry != 0 && millis() - lastTry < RESOLVE_RETRY_MS) return;
+  lastTry = millis();
+
+  String reply;
+  if (httpPostJson(String(SERVER_URL) + "/" DEVICE_ID "/resolve", "{}", reply)) {
+    resolvePending = false;
+    lastTry = 0;
+    Serial.println("Incident resolved on the server");
+  }
 }
 
 void checkSensors() {
@@ -275,7 +321,8 @@ void checkSensors() {
   }
 
   Serial.print("Status: ");
-  Serial.println(fireAlarm ? "FIRE ALARM" : (warning ? "WARNING" : "OK"));
+  Serial.println(incidentLive ? "FIRE INCIDENT LIVE (press button to resolve)"
+                              : (fireAlarm ? "FIRE ALARM" : (warning ? "WARNING" : "OK")));
   Serial.println();
 
   // Post every POST_INTERVAL_MS, or immediately when the alarm state changes
@@ -286,13 +333,14 @@ void checkSensors() {
     bool buzz = true;
     bool ok = postSensorData(smokeValue, flameValue, tempC, fireAlarm, buzz);
 
-    if (fireAlarm) {
+    if (fireAlarm && !incidentLive) {
       // Server unreachable -> buzz anyway (fail-safe). Otherwise obey the camera check.
-      serverVerdict = (!ok || buzz) ? VERDICT_BUZZ : VERDICT_SILENT;
+      // Once live, the buzzer stays on until the button is pressed.
+      incidentLive = !ok || buzz;
       applyBuzzer();   // before the LED blink, which blocks
       Serial.print("Camera verification: ");
-      Serial.println(!ok ? "server unreachable -> BUZZ (fail-safe)"
-                         : (buzz ? "fire confirmed -> BUZZ" : "no fire in image -> SILENT"));
+      Serial.println(!ok ? "server unreachable -> BUZZ until button (fail-safe)"
+                         : (buzz ? "fire confirmed -> BUZZ until button" : "no fire in image -> SILENT"));
     }
 
     if (ok) {
@@ -370,7 +418,8 @@ void loop() {
   static unsigned long lastRead = 0;
 
   ensureWiFi();
-  applyBuzzer();   // checks the switch on every pass
+  pollButton();   // every pass, so the buzzer stops the moment it is pressed
+  sendResolve();
 
   if (millis() - lastRead >= SENSOR_INTERVAL_MS) {
     lastRead = millis();

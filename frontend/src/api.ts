@@ -8,6 +8,9 @@ const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 // headers) unless this header is sent. Same-origin calls don't need it.
 const HEADERS: HeadersInit = BASE_URL ? { 'ngrok-skip-browser-warning': 'true' } : {}
 
+/** Server-Sent Events: what changed, as it happens (see useLiveEvents). */
+export const eventsUrl = `${BASE_URL}/api/v1/events`
+
 export interface Bounds {
   min_lat: number
   min_lng: number
@@ -97,6 +100,8 @@ export interface FireAlert {
   temperature: number | null
   fire_score: number | null
   created_at: string
+  /** null while the incident is live: buzzer on, until the device's button is pressed */
+  resolved_at: string | null
   device_name: string | null
   station_name: string | null
   station_phone: string | null

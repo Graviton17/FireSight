@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.api.v1.schemas import (
     FireImageResponse,
+    IncidentResolveResponse,
     PaginatedResponse,
     SensorReadingCreateRequest,
     SensorReadingCreateResponse,
@@ -21,7 +22,8 @@ from app.data_layer.data_classes.sensor_reading import SensorReading
 from app.services.fire_alert_service import FireAlertService
 from app.services.fire_capture_service import FireCaptureService
 from app.services.fire_station_service import FireStationService
-from app.services.fire_verification_service import FireVerificationService
+from app.services.fire_verification_service import FireVerificationService, Verification
+from app.services.live_events import LiveEvents
 from app.services.sensor_reading_service import SensorReadingService
 from app.telemetries.logger import logger
 
@@ -54,6 +56,13 @@ async def _nearest_stations(device_id: str, fire: bool) -> List[NearbyFireStatio
     return await FireStationService.nearest_for_alarm(device_id)
 
 
+async def _verify(device_id: str, fire: bool) -> Verification:
+    # A live incident is already confirmed: keep buzzing, no new photo.
+    if fire and await FireAlertService.live_for_device(device_id) is not None:
+        return Verification(status="incident_live", buzz=True)
+    return await FireVerificationService.verify(fire)
+
+
 @router.post("", response_model=SensorReadingCreateResponse, status_code=201)
 async def create_sensor_reading(request_data: SensorReadingCreateRequest, background_tasks: BackgroundTasks):
     """Store one reading from an ESP32 and tell it whether to buzz.
@@ -61,6 +70,8 @@ async def create_sensor_reading(request_data: SensorReadingCreateRequest, backgr
     On ``fire: true`` the phone camera snapshot is checked by the image model
     (second verification) before answering; ``buzz`` is the final decision.
     When it buzzes, the nearest fire stations come back too.
+    While the device has a live incident (confirmed, button not pressed yet)
+    the camera is skipped and the answer is always ``buzz: true``.
     The image, verdict and the alert (which station was called) are stored
     after the response is sent.
     """
@@ -74,11 +85,11 @@ async def create_sensor_reading(request_data: SensorReadingCreateRequest, backgr
             temperature=request_data.temperature,
             fire=request_data.fire,
         ),
-        FireVerificationService.verify(request_data.fire),
+        _verify(request_data.device_id, request_data.fire),
         _nearest_stations(request_data.device_id, request_data.fire),
     )
 
-    if verification.status != "not_needed":
+    if verification.status not in ("not_needed", "incident_live"):
         prediction = verification.prediction
         logger.warning(
             "Fire verification",
@@ -90,10 +101,12 @@ async def create_sensor_reading(request_data: SensorReadingCreateRequest, backgr
             reason=verification.reason,
             latency_ms=verification.latency_ms,
         )
+    LiveEvents.publish("reading", reading.device_id)
+    # The call first: it shouldn't wait on the snapshot upload.
+    if verification.buzz and stations and verification.status != "incident_live":
+        background_tasks.add_task(FireAlertService.record, reading, verification, stations)
     if verification.image is not None:
         background_tasks.add_task(FireVerificationService.store, reading, verification)
-    if verification.buzz and stations:
-        background_tasks.add_task(FireAlertService.record, reading, verification, stations)
 
     return SensorReadingCreateResponse(
         **asdict(reading),
@@ -104,6 +117,20 @@ async def create_sensor_reading(request_data: SensorReadingCreateRequest, backgr
             [nearby_fire_station_to_response(s) for s in stations] if verification.buzz else []
         ),
     )
+
+
+@router.post("/{device_id}/resolve", response_model=IncidentResolveResponse)
+async def resolve_incident(device_id: str):
+    """The button on the device was pressed: the fire is handled.
+
+    Closes the device's live incident; its next fire is a new one, checked
+    by the camera again.
+    """
+    resolved = await FireAlertService.resolve(device_id)
+    logger.warning("Incident resolved", device_id=device_id, resolved=len(resolved))
+    if resolved:
+        LiveEvents.publish("alert", device_id)
+    return IncidentResolveResponse(resolved=len(resolved))
 
 
 @router.get("/{device_id}/latest", response_model=SensorReadingResponse)

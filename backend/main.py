@@ -11,6 +11,7 @@ from app.core.detection import FireClassifier
 from app.core.errors import register_exception_handlers
 from app.data_layer.database_manager import DatabaseManager
 from app.services.fire_capture_service import FireCaptureService
+from app.services.live_events import install_shutdown_hook
 from app.services.phone_location_service import PhoneLocationService
 from app.static_memory_cache import StaticMemoryCache
 from app.telemetries.logger import logger
@@ -59,6 +60,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("App is shutting down")
 
+
+install_shutdown_hook()
 
 app = FastAPI(
     title="FireSight Backend",

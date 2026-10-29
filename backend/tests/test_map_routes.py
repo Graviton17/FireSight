@@ -129,10 +129,13 @@ class _FakeAlerts:
         self.latest = None
 
     async def latest_for_device(self, device_id):
+        await asyncio.sleep(0.01)  # a real query takes a while: room for a race
         return self.latest
 
     async def create_alert(self, data):
+        await asyncio.sleep(0.01)
         self.created.append(data)
+        self.latest = replace(ALERT, created_at=data["created_at"])
 
 
 class _FakeDevices:
@@ -170,13 +173,48 @@ def test_no_alert_when_not_buzzing(fake_db):
     assert fake_db.fire_alerts.created == []
 
 
-def test_same_fire_is_one_call(fake_db):
-    fake_db.fire_alerts.latest = replace(ALERT, created_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat())
+def test_live_incident_is_one_call(fake_db):
+    # Hours later, but nobody pressed the button: still the same fire.
+    fake_db.fire_alerts.latest = replace(ALERT, created_at=(datetime.now(UTC) - timedelta(hours=3)).isoformat())
     asyncio.run(FireAlertService.record(READING, Verification(status="confirmed", buzz=True), STATIONS))
     assert fake_db.fire_alerts.created == []
 
 
-def test_new_call_after_cooldown(fake_db):
-    fake_db.fire_alerts.latest = replace(ALERT, created_at=(datetime.now(UTC) - timedelta(minutes=6)).isoformat())
-    asyncio.run(FireAlertService.record(READING, Verification(status="confirmed", buzz=True), STATIONS))
+def test_new_call_after_resolve(fake_db):
+    resolved_at = datetime.now(UTC) - timedelta(seconds=30)
+    fake_db.fire_alerts.latest = replace(
+        ALERT, created_at=(resolved_at - timedelta(minutes=1)).isoformat(), resolved_at=resolved_at.isoformat()
+    )
+    reading = replace(READING, created_at=datetime.now(UTC).isoformat())
+    asyncio.run(FireAlertService.record(reading, Verification(status="confirmed", buzz=True), STATIONS))
     assert len(fake_db.fire_alerts.created) == 1
+
+
+def test_reading_before_resolve_is_not_a_new_call(fake_db):
+    # A reading from before the button press whose task ran late.
+    fake_db.fire_alerts.latest = replace(ALERT, resolved_at="2026-10-29T09:00:10+00:00")
+    reading = replace(READING, created_at="2026-10-29T09:00:05+00:00")
+    asyncio.run(FireAlertService.record(reading, Verification(status="confirmed", buzz=True), STATIONS))
+    assert fake_db.fire_alerts.created == []
+
+
+def test_concurrent_readings_make_one_call(fake_db):
+    # Two readings of the same fire, 5 s apart, recorded at the same time.
+    first = replace(READING, id="r-a", created_at="2026-10-29T09:00:00+00:00")
+    second = replace(READING, id="r-b", created_at="2026-10-29T09:00:05+00:00")
+    confirmed = Verification(status="confirmed", buzz=True)
+
+    async def both():
+        await asyncio.gather(
+            FireAlertService.record(second, confirmed, STATIONS),
+            FireAlertService.record(first, confirmed, STATIONS),
+        )
+
+    asyncio.run(both())
+    assert len(fake_db.fire_alerts.created) == 1
+
+
+def test_call_time_is_the_alarm_time(fake_db):
+    reading = replace(READING, created_at="2026-10-29T09:00:00+00:00")
+    asyncio.run(FireAlertService.record(reading, Verification(status="confirmed", buzz=True), STATIONS))
+    assert fake_db.fire_alerts.created[0]["created_at"] == "2026-10-29T09:00:00+00:00"

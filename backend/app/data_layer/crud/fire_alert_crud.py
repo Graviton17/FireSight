@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.data_layer.crud.base_crud import BaseCrud
@@ -55,3 +56,29 @@ class FireAlertCrud(BaseCrud):
         if response.data:
             return self._row_to_model(response.data[0])
         return None
+
+    async def live_for_device(self, device_id: str) -> Optional[FireAlert]:
+        """The device's unresolved incident, if any."""
+        response = (
+            await self.supabase.table(self.table_name)
+            .select("*")
+            .eq("device_id", device_id)
+            .is_("resolved_at", "null")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return self._row_to_model(response.data[0])
+        return None
+
+    async def resolve_live(self, device_id: str) -> List[FireAlert]:
+        """Close every live incident of the device. Returns the closed rows."""
+        response = (
+            await self.supabase.table(self.table_name)
+            .update({"resolved_at": datetime.now(UTC).isoformat()})
+            .eq("device_id", device_id)
+            .is_("resolved_at", "null")
+            .execute()
+        )
+        return [self._row_to_model(row) for row in response.data]
