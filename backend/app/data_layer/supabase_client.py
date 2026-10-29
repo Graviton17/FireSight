@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 
+import httpx
 from httpx import AsyncClient as HttpxAsyncClient
 from httpx import Limits, Timeout
 from supabase.client import AsyncClient, acreate_client
@@ -9,6 +10,38 @@ from app.telemetries.logger import logger
 # PostgREST defaults to http2=True which caps concurrent streams; use HTTP/1.1.
 _SUPABASE_HTTP_LIMITS = Limits(max_connections=50, max_keepalive_connections=20)
 _SUPABASE_HTTP_TIMEOUT = Timeout(30.0)
+
+# Supabase closes idle keep-alive connections; reusing one that just closed
+# fails with ReadError/RemoteProtocolError before any response. postgrest only
+# retries Cloudflare 503/520, so retry read-only requests here.
+_RETRY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+_RETRY_ERRORS = (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError)
+_RETRY_ATTEMPTS = 2
+
+
+class _RetryTransport(httpx.AsyncBaseTransport):
+    def __init__(self, inner: httpx.AsyncBaseTransport):
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        attempt = 0
+        while True:
+            try:
+                return await self._inner.handle_async_request(request)
+            except _RETRY_ERRORS as e:
+                if request.method not in _RETRY_METHODS or attempt >= _RETRY_ATTEMPTS:
+                    raise
+                attempt += 1
+                logger.warning(
+                    "Supabase connection dropped, retrying",
+                    method=request.method,
+                    path=request.url.path,
+                    attempt=attempt,
+                    error=type(e).__name__,
+                )
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
 
 
 def _build_postgrest_http_client(
@@ -20,8 +53,10 @@ def _build_postgrest_http_client(
         headers=headers,
         http2=False,
         follow_redirects=True,
-        limits=_SUPABASE_HTTP_LIMITS,
         timeout=_SUPABASE_HTTP_TIMEOUT,
+        transport=_RetryTransport(
+            httpx.AsyncHTTPTransport(http2=False, limits=_SUPABASE_HTTP_LIMITS)
+        ),
     )
 
 

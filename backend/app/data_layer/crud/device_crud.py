@@ -65,5 +65,6 @@ class DeviceCrud(BaseCrud):
                 "p_max_lng": max_lng,
                 "p_limit": limit,
             },
+            get=True,
         ).execute()
         return [MapDevice(**row) for row in response.data or []]

@@ -1,28 +1,58 @@
-import type { ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import { AlertTriangle, ShieldCheck, X } from 'lucide-react'
 
 import type { FireAlert } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { SHEET_HEIGHT, useLayout } from '@/hooks/useLayout'
 import { formatPercent } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-/** Floating detail card: right column on desktop, bottom sheet on phones. Doesn't block the map. */
+/**
+ * Floating detail card that leaves the map usable: a bottom sheet on phones
+ * in portrait (tap the handle to expand), a docked side panel elsewhere.
+ */
 export function PanelShell({ children, onClose, label }: { children: ReactNode; onClose: () => void; label: string }) {
+  const layout = useLayout()
+  const [expanded, setExpanded] = useState(false)
+  const sheet = layout.mode === 'sheet'
+
+  const style: CSSProperties = sheet
+    ? { height: `${(expanded ? SHEET_HEIGHT.expanded : SHEET_HEIGHT.collapsed) * 100}dvh` }
+    : {
+        top: `max(${layout.gutter}px, env(safe-area-inset-top))`,
+        bottom: `max(${layout.gutter}px, env(safe-area-inset-bottom))`,
+        right: `max(${layout.gutter}px, env(safe-area-inset-right))`,
+        width: layout.panelWidth,
+      }
+
   return (
     <aside
       aria-label={label}
+      style={style}
       className={cn(
-        'absolute z-[1000] flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xl',
-        'inset-x-2 bottom-2 max-h-[62dvh]',
-        'md:inset-x-auto md:top-4 md:right-4 md:bottom-4 md:max-h-none md:w-[420px]',
+        'absolute z-[1000] flex flex-col overflow-hidden border bg-card text-card-foreground shadow-xl',
+        sheet
+          ? 'inset-x-0 bottom-0 rounded-t-2xl border-b-0 pb-[env(safe-area-inset-bottom)] transition-[height] duration-200 ease-out motion-reduce:transition-none'
+          : 'rounded-xl',
       )}
     >
+      {sheet && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          aria-label={expanded ? 'Shrink details' : 'Expand details'}
+          aria-expanded={expanded}
+          className="flex h-5 w-full shrink-0 cursor-pointer items-center justify-center focus-visible:outline-none [&:focus-visible>span]:bg-foreground"
+        >
+          <span className="h-1 w-10 rounded-full bg-muted-foreground/40" />
+        </button>
+      )}
       <Button
         variant="ghost"
         size="icon-sm"
-        className="absolute top-3 right-3 z-10"
+        className={cn('absolute right-3 z-10', sheet ? 'top-6' : 'top-3')}
         onClick={onClose}
         aria-label="Close details"
       >
@@ -96,7 +126,7 @@ export function ErrorNote({ error }: { error: Error }) {
 
 export function PanelSkeleton() {
   return (
-    <div className="space-y-3 p-5">
+    <div className="space-y-3 p-4 sm:p-5">
       <Skeleton className="h-6 w-2/3" />
       <Skeleton className="h-4 w-1/2" />
       <div className="grid grid-cols-3 gap-2 pt-2">

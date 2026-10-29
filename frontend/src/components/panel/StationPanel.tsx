@@ -34,7 +34,7 @@ export function StationPanel({ stationId, onClose, onSelectDevice, onAlerts }: P
   if (!data) {
     return (
       <PanelShell onClose={onClose} label="Fire station details">
-        {error ? <div className="p-5 pt-12"><ErrorNote error={error} /></div> : <PanelSkeleton />}
+        {error ? <div className="p-4 pt-12 sm:p-5 sm:pt-12"><ErrorNote error={error} /></div> : <PanelSkeleton />}
       </PanelShell>
     )
   }
@@ -46,7 +46,7 @@ export function StationPanel({ stationId, onClose, onSelectDevice, onAlerts }: P
 
   return (
     <PanelShell onClose={onClose} label="Fire station details">
-      <header className="space-y-1 border-b p-5 pr-12">
+      <header className="space-y-1 border-b p-4 pr-12 sm:p-5 sm:pr-12">
         <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
           <FireExtinguisher className="size-3.5" />
           Fire station
@@ -71,7 +71,7 @@ export function StationPanel({ stationId, onClose, onSelectDevice, onAlerts }: P
       </header>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-5 p-5">
+        <div className="space-y-5 p-4 sm:p-5">
           {error && <ErrorNote error={error} />}
 
           <div className="grid grid-cols-3 gap-2">

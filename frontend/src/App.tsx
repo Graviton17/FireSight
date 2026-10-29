@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { MapContainer, Marker, Polyline, TileLayer, ZoomControl } from 'react-leaflet'
-import type { Map as LeafletMap } from 'leaflet'
+import L, { type Map as LeafletMap, type PointTuple } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import { api, type FireAlert } from '@/api'
@@ -8,6 +8,7 @@ import { MapOverlay } from '@/components/MapOverlay'
 import { deviceIcon, stationIcon } from '@/components/map/icons'
 import { DevicePanel } from '@/components/panel/DevicePanel'
 import { StationPanel } from '@/components/panel/StationPanel'
+import { SHEET_HEIGHT, useLayout, type Layout } from '@/hooks/useLayout'
 import { useViewportData } from '@/hooks/useViewportData'
 import { deviceState } from '@/lib/format'
 
@@ -15,6 +16,23 @@ import { deviceState } from '@/lib/format'
 const START_CENTER: [number, number] = [22.6, 71.6]
 const START_ZOOM = 7
 const FOCUS_ZOOM = 14
+
+// Margin around the uncovered map area, so a focused marker isn't on the edge.
+const MARGIN = 24
+// The overlay's title bar on phones (it shrinks to that while a sheet is open).
+const OVERLAY_BAR = 64
+
+/** Padding (px) that keeps a point out from under the detail panel and overlay. */
+function uncoveredPadding(layout: Layout): { paddingTopLeft: PointTuple; paddingBottomRight: PointTuple } {
+  if (layout.mode === 'sheet') {
+    const sheet = Math.round(window.innerHeight * SHEET_HEIGHT.collapsed)
+    return { paddingTopLeft: [MARGIN, OVERLAY_BAR + MARGIN], paddingBottomRight: [MARGIN, sheet + MARGIN] }
+  }
+  return {
+    paddingTopLeft: [MARGIN, MARGIN],
+    paddingBottomRight: [layout.panelWidth + layout.gutter + MARGIN, MARGIN],
+  }
+}
 
 export type Selection = { kind: 'station'; id: string } | { kind: 'device'; id: string } | null
 
@@ -29,20 +47,27 @@ export default function App() {
     setSelection(next)
   }, [])
 
-  const flyTo = useCallback(
-    (lat: number, lng: number) => map?.flyTo([lat, lng], Math.max(map.getZoom(), FOCUS_ZOOM), { duration: 0.8 }),
-    [map],
-  )
+  const layout = useLayout()
 
-  // Clicked on the map: keep the marker visible beside the detail panel.
-  const reveal = useCallback(
+  // Go to a point, landing it in the part of the map the panel doesn't cover.
+  const flyTo = useCallback(
     (lat: number, lng: number) => {
       if (!map) return
-      const desktop = window.matchMedia('(min-width: 768px)').matches
-      const pad: [number, number] = desktop ? [460, 40] : [40, Math.round(window.innerHeight * 0.65)]
-      map.panInside([lat, lng], { paddingTopLeft: [40, 40], paddingBottomRight: pad })
+      const zoom = Math.max(map.getZoom(), FOCUS_ZOOM)
+      const { paddingTopLeft: [l, t], paddingBottomRight: [r, b] } = uncoveredPadding(layout)
+      const size = map.getSize()
+      // Shift the map centre by how far the visible area's centre is from it.
+      const offset = L.point((l - r) / 2, (t - b) / 2)
+      const target = map.unproject(map.project([lat, lng], zoom).subtract(offset), zoom)
+      if (size.x > 0) map.flyTo(target, zoom, { duration: 0.8 })
     },
-    [map],
+    [map, layout],
+  )
+
+  // Clicked on the map: pan only if the marker would end up under the panel.
+  const reveal = useCallback(
+    (lat: number, lng: number) => map?.panInside([lat, lng], uncoveredPadding(layout)),
+    [map, layout],
   )
 
   const stationsById = useMemo(() => new Map(stations.map((s) => [s.id, s])), [stations])
@@ -154,6 +179,7 @@ export default function App() {
         truncated={truncated}
         loading={loading}
         error={error}
+        panelOpen={selection !== null}
         onSelectDevice={(d) => {
           select({ kind: 'device', id: d.device_id })
           flyTo(d.latitude, d.longitude)

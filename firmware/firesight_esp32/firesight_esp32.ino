@@ -12,7 +12,7 @@ const char* WIFI_PASS = "Graviton@17Hmm";
 
 // ---------- Server ----------
 // FireSight backend (backend/main.py). Replace the IP with your PC's LAN IP.
-const char* SERVER_URL = "http://10.29.223.173:8000/api/v1/sensor-data";
+const char* SERVER_URL = "http://10.29.223.123:8000/api/v1/sensor-data";
 #define HTTP_TIMEOUT_MS 5000       // server verifies fire with the camera before answering
 #define DEVICE_ID "esp32-fire-01"
 #define POST_INTERVAL_MS 5000      // also posts immediately when alarm state changes

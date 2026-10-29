@@ -221,3 +221,16 @@ html, body, #root {
 @media (prefers-reduced-motion: reduce) {
   .fs-pin--device[data-state='fire'] { animation: none; }
 }
+
+/* ---------- Responsive map chrome ---------- */
+
+/* Keep Leaflet's corner controls clear of notches and the home indicator. */
+.leaflet-bottom { margin-bottom: env(safe-area-inset-bottom); }
+.leaflet-left { margin-left: env(safe-area-inset-left); }
+.leaflet-right { margin-right: env(safe-area-inset-right); }
+
+/* Phones pinch to zoom; the buttons would sit under the bottom sheet. */
+@media (max-width: 767px) {
+  .leaflet-control-zoom { display: none; }
+  .leaflet-control-attribution { font-size: 10px; }
+}

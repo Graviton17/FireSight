@@ -58,6 +58,7 @@ class FireStationCrud(BaseCrud):
         response = await self.supabase.rpc(
             RpcFunctionsConstant.NEAREST_FIRE_STATIONS,
             {"p_latitude": latitude, "p_longitude": longitude, "p_limit": limit},
+            get=True,
         ).execute()
         return [NearbyFireStation(**row) for row in response.data or []]
 
@@ -73,5 +74,6 @@ class FireStationCrud(BaseCrud):
                 "p_max_lng": max_lng,
                 "p_limit": limit,
             },
+            get=True,
         ).execute()
         return [MapFireStation(**row) for row in response.data or []]

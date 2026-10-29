@@ -18,40 +18,50 @@ interface Props {
   onAlerts: (alerts: FireAlert[]) => void
 }
 
-// The device posts every 5 s; refresh a bit slower than that.
-const REFRESH_MS = 5_000
+// The device posts every 5 s, so its live reading refreshes as often.
+const LIVE_REFRESH_MS = 5_000
+// Triggers change rarely, and every snapshot needs a signed URL from storage.
+const HISTORY_REFRESH_MS = 30_000
 
 export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Props) {
-  const { data, error } = usePolled(
+  const live = usePolled(
     deviceId,
     async (signal) => {
-      const [device, readings, alerts, images] = await Promise.all([
+      const [device, readings] = await Promise.all([
         // 404 = no registered location; still show its readings.
         api.device(deviceId, signal).catch((e) => {
           if (e instanceof ApiError && e.status === 404) return null
           throw e
         }),
         api.deviceReadings(deviceId, signal),
-        api.deviceAlerts(deviceId, signal),
-        api.deviceImages(deviceId, signal),
       ])
-      return { device, readings, alerts, images }
+      return { device, readings }
     },
-    REFRESH_MS,
+    LIVE_REFRESH_MS,
+  )
+  const history = usePolled(
+    deviceId,
+    async (signal) => {
+      const [alerts, images] = await Promise.all([api.deviceAlerts(deviceId, signal), api.deviceImages(deviceId, signal)])
+      return { alerts, images }
+    },
+    HISTORY_REFRESH_MS,
   )
 
   useEffect(() => {
-    if (data) onAlerts(data.alerts.items)
-  }, [data, onAlerts])
+    if (history.data) onAlerts(history.data.alerts.items)
+  }, [history.data, onAlerts])
 
-  if (!data) {
+  const error = live.error ?? history.error
+  if (!live.data || !history.data) {
     return (
       <PanelShell onClose={onClose} label="Device details">
-        {error ? <div className="p-5 pt-12"><ErrorNote error={error} /></div> : <PanelSkeleton />}
+        {error ? <div className="p-4 pt-12 sm:p-5 sm:pt-12"><ErrorNote error={error} /></div> : <PanelSkeleton />}
       </PanelShell>
     )
   }
 
+  const data = { ...live.data, ...history.data }
   const { device, readings, alerts, images } = data
   const latest = readings.items[0]
   const state = deviceState({ last_reading_at: latest?.created_at ?? null, last_fire: latest?.fire ?? null })
@@ -59,7 +69,7 @@ export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Pr
 
   return (
     <PanelShell onClose={onClose} label="Device details">
-      <header className="space-y-1 border-b p-5 pr-12">
+      <header className="space-y-1 border-b p-4 pr-12 sm:p-5 sm:pr-12">
         <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
           <Cpu className="size-3.5" />
           Device
@@ -73,7 +83,7 @@ export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Pr
       </header>
 
       <Tabs defaultValue="live" className="min-h-0 flex-1 gap-0">
-        <div className="border-b px-5 py-2">
+        <div className="border-b px-4 py-2 sm:px-5">
           <TabsList className="w-full">
             <TabsTrigger value="live">Live</TabsTrigger>
             <TabsTrigger value="log">Log</TabsTrigger>
@@ -85,7 +95,7 @@ export function DevicePanel({ deviceId, onClose, onSelectStation, onAlerts }: Pr
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="p-5">
+          <div className="p-4 sm:p-5">
             {error && <div className="mb-4"><ErrorNote error={error} /></div>}
 
             <TabsContent value="live" className="space-y-5">

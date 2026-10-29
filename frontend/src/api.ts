@@ -180,5 +180,5 @@ export const api = {
     get<Paginated<SensorReading>>(`/sensor-data/${encodeURIComponent(deviceId)}`, { page_size: 30 }, signal),
 
   deviceImages: (deviceId: string, signal?: AbortSignal) =>
-    get<Paginated<FireImage>>(`/sensor-data/${encodeURIComponent(deviceId)}/images`, { page_size: 50 }, signal),
+    get<Paginated<FireImage>>(`/sensor-data/${encodeURIComponent(deviceId)}/images`, { page_size: 20 }, signal),
 }
