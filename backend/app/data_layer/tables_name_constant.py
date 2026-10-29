@@ -13,9 +13,12 @@ class TablesNameConstant:
     DEVICES = "devices"
     FIRE_IMAGES = "fire_images"
     FIRE_DETECTIONS = "fire_detections"
+    FIRE_ALERTS = "fire_alerts"
 
 
 class RpcFunctionsConstant:
     """Postgres functions called over PostgREST RPC."""
 
     NEAREST_FIRE_STATIONS = "nearest_fire_stations"
+    FIRE_STATIONS_IN_BOUNDS = "fire_stations_in_bounds"
+    DEVICES_IN_BOUNDS = "devices_in_bounds"

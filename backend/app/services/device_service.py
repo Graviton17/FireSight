@@ -1,9 +1,9 @@
 import math
-from typing import Optional
+from typing import List, Optional
 
 from app.core.camera import PhoneLocation
 from app.data_layer.crud.device_crud import DeviceCrud
-from app.data_layer.data_classes.device import Device
+from app.data_layer.data_classes.device import Device, MapDevice
 from app.data_layer.database_manager import DatabaseManager
 from app.services.phone_location_service import PhoneLocationService
 from app.static_memory_cache import StaticMemoryCache
@@ -64,6 +64,19 @@ class DeviceService:
             return await DeviceService._devices_crud().get_by_device_id(device_id)
         except Exception as e:
             logger.error("Error getting device", device_id=device_id, exc_info=e)
+            raise
+
+    @staticmethod
+    async def in_bounds(
+        min_lat: float, min_lng: float, max_lat: float, max_lng: float, limit: int = 500
+    ) -> List[MapDevice]:
+        """Devices inside a map viewport, each with its latest reading and last alert."""
+        try:
+            return await DeviceService._devices_crud().in_bounds(
+                min_lat, min_lng, max_lat, max_lng, limit
+            )
+        except Exception as e:
+            logger.error("Error listing devices in bounds", exc_info=e)
             raise
 
     @staticmethod

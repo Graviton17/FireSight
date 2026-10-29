@@ -35,3 +35,19 @@ class NearbyFireStation:
     city: Optional[str] = None
     phone: Optional[str] = None
     google_maps_url: Optional[str] = None
+
+
+@dataclass
+class MapFireStation:
+    """One row of the fire_stations_in_bounds() RPC."""
+
+    id: str
+    name: str
+    latitude: float
+    longitude: float
+    alert_count: int = 0
+    last_alert_at: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    phone: Optional[str] = None
+    google_maps_url: Optional[str] = None

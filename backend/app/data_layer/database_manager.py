@@ -8,6 +8,7 @@
 from typing import Optional, Tuple
 
 from app.data_layer.crud.device_crud import DeviceCrud
+from app.data_layer.crud.fire_alert_crud import FireAlertCrud
 from app.data_layer.crud.fire_detection_crud import FireDetectionCrud
 from app.data_layer.crud.fire_image_crud import FireImageCrud
 from app.data_layer.crud.fire_station_crud import FireStationCrud
@@ -37,6 +38,7 @@ class DatabaseManager:
     devices: Optional[DeviceCrud]
     fire_images: Optional[FireImageCrud]
     fire_detections: Optional[FireDetectionCrud]
+    fire_alerts: Optional[FireAlertCrud]
 
     def __init__(self) -> None:
         self.supabase = None
@@ -45,6 +47,7 @@ class DatabaseManager:
         self.devices = None
         self.fire_images = None
         self.fire_detections = None
+        self.fire_alerts = None
 
     # ------------------------------------------------------------------
     # Async initialisation
@@ -64,6 +67,7 @@ class DatabaseManager:
         self.devices = DeviceCrud(self.supabase)
         self.fire_images = FireImageCrud(self.supabase)
         self.fire_detections = FireDetectionCrud(self.supabase)
+        self.fire_alerts = FireAlertCrud(self.supabase)
 
     # ------------------------------------------------------------------
     # Accessors
@@ -97,4 +101,5 @@ class DatabaseManager:
             self.devices = None
             self.fire_images = None
             self.fire_detections = None
+            self.fire_alerts = None
         DatabaseManager._instance = None

@@ -21,7 +21,7 @@ app/
     database_manager.py     singleton holding Supabase + CRUD instances
     crud/                   BaseCrud + SensorReadingCrud
     data_classes/           one dataclass per table
-supabase/migrations/        sensor_readings, fire_images, fire_detections, fire_stations, devices; fire-images bucket
+supabase/migrations/        sensor_readings, fire_images, fire_detections, fire_stations, devices, fire_alerts; fire-images bucket
 scripts/fire_stations/      Google Maps scrape + importer for Gujarat fire stations
 models/                     local model weights (gitignored, see 'Fire model')
 tests/
@@ -129,8 +129,14 @@ signed `url` and its `detection`.
 | GET | `/api/v1/fire-stations?search=&page=&page_size=` | Station directory, alphabetical. |
 | POST | `/api/v1/fire-stations` | Add a station by hand: `name`, `latitude`, `longitude`, optional `address`, `city`, `phone`, … |
 | GET | `/api/v1/fire-stations/nearest?latitude=&longitude=&limit=3` | Closest stations to a point. |
+| GET | `/api/v1/fire-stations/in-bounds?min_lat=&min_lng=&max_lat=&max_lng=&limit=500` | Stations in a map viewport, with `alert_count` and `last_alert_at`. `truncated` is true when `limit` was hit. |
+| GET | `/api/v1/fire-stations/{id}` | One station. |
+| GET | `/api/v1/fire-stations/{id}/alerts?page=&page_size=` | Alarms that called this station, newest first, with `device_name`. |
 | PUT | `/api/v1/devices/{device_id}` | Set where a device is installed: `latitude`, `longitude`, optional `name`, `address`. |
 | GET | `/api/v1/devices/{device_id}/nearest-fire-stations?limit=3` | Closest stations to that device. |
+| GET | `/api/v1/devices/in-bounds?min_lat=&min_lng=&max_lat=&max_lng=&limit=500` | Devices in a map viewport, each with its latest reading (`last_*`) and alert count. |
+| GET | `/api/v1/devices/{device_id}` | One device's location. |
+| GET | `/api/v1/devices/{device_id}/alerts?page=&page_size=` | This device's alarms and the station each one called, newest first. |
 | GET | `/health` | 503 until Supabase is connected. |
 
 Test the POST by hand:
@@ -182,7 +188,9 @@ uses its GPS.
 If the alarm buzzes, the backend logs the fire's location and the nearest
 station (name, phone, distance, Maps link) and returns the 3 nearest in the
 POST response as `nearest_fire_stations`. The lookup uses a PostGIS index (no
-full table scan); distances are straight-line, not road.
+full table scan); distances are straight-line, not road. After the response,
+a `fire_alerts` row records that the device called its nearest station (time,
+distance, camera verdict, sensor values); the map's popups read these.
 
 ## Tests
 

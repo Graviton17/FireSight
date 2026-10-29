@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 
 from app.data_layer.crud.fire_station_crud import FireStationCrud
-from app.data_layer.data_classes.fire_station import FireStation, NearbyFireStation
+from app.data_layer.data_classes.fire_station import FireStation, MapFireStation, NearbyFireStation
 from app.data_layer.database_manager import DatabaseManager
 from app.services.device_service import DeviceService
 from app.telemetries.logger import logger
@@ -61,6 +61,27 @@ class FireStationService:
             )
         except Exception as e:
             logger.error("Error listing fire stations", exc_info=e)
+            raise
+
+    @staticmethod
+    async def get(station_id: str) -> Optional[FireStation]:
+        try:
+            return await FireStationService._stations_crud().get_by_id(station_id)
+        except Exception as e:
+            logger.error("Error getting fire station", station_id=station_id, exc_info=e)
+            raise
+
+    @staticmethod
+    async def in_bounds(
+        min_lat: float, min_lng: float, max_lat: float, max_lng: float, limit: int = 500
+    ) -> List[MapFireStation]:
+        """Stations inside a map viewport, with how often each has been called."""
+        try:
+            return await FireStationService._stations_crud().in_bounds(
+                min_lat, min_lng, max_lat, max_lng, limit
+            )
+        except Exception as e:
+            logger.error("Error listing fire stations in bounds", exc_info=e)
             raise
 
     @staticmethod

@@ -20,6 +20,15 @@ from app.api.v1.schemas.fire_station import (
     fire_station_to_response,
     nearby_fire_station_to_response,
 )
+from app.api.v1.schemas.map import (
+    BoundsResponse,
+    FireAlertResponse,
+    MapDeviceResponse,
+    MapFireStationResponse,
+    fire_alert_to_response,
+    map_device_to_response,
+    map_fire_station_to_response,
+)
 from app.api.v1.schemas.sensor_reading import (
     SensorReadingCreateRequest,
     SensorReadingCreateResponse,
@@ -48,6 +57,14 @@ __all__ = [
     "FireImageResponse",
     "fire_detection_to_response",
     "fire_image_to_response",
+    # Map
+    "BoundsResponse",
+    "FireAlertResponse",
+    "MapDeviceResponse",
+    "MapFireStationResponse",
+    "fire_alert_to_response",
+    "map_device_to_response",
+    "map_fire_station_to_response",
     # Sensor reading
     "SensorReadingCreateRequest",
     "SensorReadingCreateResponse",

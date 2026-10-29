@@ -18,6 +18,7 @@ from app.api.v1.schemas import (
 from app.data_layer.data_classes.fire_image import FireImage
 from app.data_layer.data_classes.fire_station import NearbyFireStation
 from app.data_layer.data_classes.sensor_reading import SensorReading
+from app.services.fire_alert_service import FireAlertService
 from app.services.fire_capture_service import FireCaptureService
 from app.services.fire_station_service import FireStationService
 from app.services.fire_verification_service import FireVerificationService
@@ -60,7 +61,8 @@ async def create_sensor_reading(request_data: SensorReadingCreateRequest, backgr
     On ``fire: true`` the phone camera snapshot is checked by the image model
     (second verification) before answering; ``buzz`` is the final decision.
     When it buzzes, the nearest fire stations come back too.
-    The image and verdict are stored after the response is sent.
+    The image, verdict and the alert (which station was called) are stored
+    after the response is sent.
     """
     # Saving the reading, verifying and the station lookup run side by side:
     # the ESP32 gives up after 5 s and verification alone may take 4.
@@ -90,6 +92,8 @@ async def create_sensor_reading(request_data: SensorReadingCreateRequest, backgr
         )
     if verification.image is not None:
         background_tasks.add_task(FireVerificationService.store, reading, verification)
+    if verification.buzz and stations:
+        background_tasks.add_task(FireAlertService.record, reading, verification, stations)
 
     return SensorReadingCreateResponse(
         **asdict(reading),

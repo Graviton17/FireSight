@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from postgrest.types import CountMethod
 
 from app.data_layer.crud.base_crud import BaseCrud
-from app.data_layer.data_classes.fire_station import FireStation, NearbyFireStation
+from app.data_layer.data_classes.fire_station import FireStation, MapFireStation, NearbyFireStation
 from app.data_layer.supabase_client import SupabaseClient
 from app.data_layer.tables_name_constant import RpcFunctionsConstant, TablesNameConstant
 
@@ -60,3 +60,18 @@ class FireStationCrud(BaseCrud):
             {"p_latitude": latitude, "p_longitude": longitude, "p_limit": limit},
         ).execute()
         return [NearbyFireStation(**row) for row in response.data or []]
+
+    async def in_bounds(
+        self, min_lat: float, min_lng: float, max_lat: float, max_lng: float, limit: int
+    ) -> List[MapFireStation]:
+        response = await self.supabase.rpc(
+            RpcFunctionsConstant.FIRE_STATIONS_IN_BOUNDS,
+            {
+                "p_min_lat": min_lat,
+                "p_min_lng": min_lng,
+                "p_max_lat": max_lat,
+                "p_max_lng": max_lng,
+                "p_limit": limit,
+            },
+        ).execute()
+        return [MapFireStation(**row) for row in response.data or []]
