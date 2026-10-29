@@ -31,6 +31,16 @@ Open http://localhost:5173. Vite proxies `/api` to `http://localhost:8000`;
 set `FIRESIGHT_API_URL` to proxy elsewhere, or `VITE_API_BASE_URL` to call a
 backend on another origin directly (add that origin to `server.cors_origins`).
 
+## Deploying (e.g. Vercel + backend over ngrok)
+
+1. Set `VITE_API_BASE_URL` in Vercel to the backend's public URL (e.g. the
+   ngrok URL) and redeploy. It is baked in at build time.
+2. Add the frontend's origin (e.g. `https://your-app.vercel.app`) to
+   `server.cors_origins` in `backend/config.json` and restart the backend.
+3. Free ngrok shows browsers a warning page instead of the API; the client
+   sends `ngrok-skip-browser-warning` whenever `VITE_API_BASE_URL` is set, so
+   this works without extra setup.
+
 ## Layout
 
 ```

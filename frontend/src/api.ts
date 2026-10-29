@@ -4,6 +4,10 @@
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
+// A backend behind free ngrok answers browsers with a warning page (no CORS
+// headers) unless this header is sent. Same-origin calls don't need it.
+const HEADERS: HeadersInit = BASE_URL ? { 'ngrok-skip-browser-warning': 'true' } : {}
+
 export interface Bounds {
   min_lat: number
   min_lng: number
@@ -137,7 +141,7 @@ export class ApiError extends Error {
 async function get<T>(path: string, params: Record<string, string | number> = {}, signal?: AbortSignal): Promise<T> {
   const query = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]))
   const url = `${BASE_URL}/api/v1${path}${query.size ? `?${query}` : ''}`
-  const res = await fetch(url, { signal })
+  const res = await fetch(url, { signal, headers: HEADERS })
   if (!res.ok) {
     // Backend errors are {"error": {"code", "message"}}
     let message = res.statusText
