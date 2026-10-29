@@ -135,6 +135,12 @@ class StaticMemoryCache:
         return float(cls.config.get("detection", {}).get("threshold", 0.7))
 
     @classmethod
+    def get_detection_force_fire(cls) -> bool:
+        """TESTING ONLY: the model's verdict is always "fire". Re-read live."""
+        cls.reload_if_changed()
+        return cls.config.get("detection", {}).get("force_fire") is True
+
+    @classmethod
     def get_verification_timeout_seconds(cls) -> float:
         """Budget for camera + model on a fire POST. The ESP32 waits 5 s in total."""
         cls.reload_if_changed()

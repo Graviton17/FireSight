@@ -146,12 +146,21 @@ class FireClassifier:
 
         scores = {self.id2label[i]: round(p, 4) for i, p in enumerate(probabilities)}
         fire_score = round(min(1.0, sum(scores[label] for label in self.fire_labels)), 4)
+        fire_detected = fire_score >= threshold
+        if StaticMemoryCache.get_detection_force_fire() and not fire_detected:
+            # Real scores are kept; only the verdict is overridden.
+            logger.warning(
+                "detection.force_fire is on: reporting fire regardless of the image",
+                fire_score=fire_score,
+                threshold=threshold,
+            )
+            fire_detected = True
         return FirePrediction(
             model=self.model_id,
             label=max(scores, key=lambda label: scores[label]),
             fire_score=fire_score,
             threshold=threshold,
-            fire_detected=fire_score >= threshold,
+            fire_detected=fire_detected,
             scores=scores,
             inference_ms=inference_ms,
         )

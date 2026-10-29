@@ -29,6 +29,7 @@
     "model_path": "models/Fire-Detection-Siglip2",
     "fire_labels": ["fire", "smoke"],
     "threshold": 0.7,
+    "force_fire": false,
     "timeout_seconds": 4,
     "device": "cpu"
   },
